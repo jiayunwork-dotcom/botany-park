@@ -2,7 +2,7 @@
   <div class="game-map-container">
     <div class="map-legend">
       <span v-for="(label, key) in plotTypeLabels" :key="key" class="legend-item">
-        <span :class="`plot-${key}` legend-color"></span>
+        <span :class="['plot-' + key, 'legend-color']"></span>
         {{ label }}
       </span>
     </div>
