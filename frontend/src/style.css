@@ -1,0 +1,107 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+:root {
+  --color-normal: #8B7355;
+  --color-greenhouse: #B8E0D2;
+  --color-pond: #87CEEB;
+  --color-rock: #A9A9A9;
+  --color-path: #DEB887;
+  --color-exhibition: #E6E6FA;
+  --color-pavilion: #FFE4B5;
+  --color-spring: #90EE90;
+  --color-summer: #FFD700;
+  --color-autumn: #F4A460;
+  --color-winter: #B0E0E6;
+}
+
+.plot-normal { background-color: var(--color-normal); }
+.plot-greenhouse { background-color: var(--color-greenhouse); }
+.plot-pond { background-color: var(--color-pond); }
+.plot-rock { background-color: var(--color-rock); }
+.plot-path { background-color: var(--color-path); }
+.plot-exhibition { background-color: var(--color-exhibition); }
+.plot-pavilion { background-color: var(--color-pavilion); }
+
+.season-spring { color: var(--color-spring); }
+.season-summer { color: var(--color-summer); }
+.season-autumn { color: var(--color-autumn); }
+.season-winter { color: var(--color-winter); }
+
+.health-bar {
+  height: 4px;
+  background: #333;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.health-fill {
+  height: 100%;
+  transition: width 0.3s, background-color 0.3s;
+}
+
+.health-excellent { background: #4CAF50; }
+.health-good { background: #8BC34A; }
+.health-fair { background: #FFC107; }
+.health-poor { background: #FF9800; }
+.health-critical { background: #F44336; }
+
+.growth-bar {
+  height: 3px;
+  background: #555;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.growth-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #7CFC00, #32CD32);
+  transition: width 0.3s;
+}
+
+.blooming {
+  animation: bloom 1.5s ease-in-out infinite;
+}
+
+@keyframes bloom {
+  0%, 100% { filter: brightness(1); transform: scale(1); }
+  50% { filter: brightness(1.3); transform: scale(1.05); }
+}
+
+.under-construction {
+  animation: construction 0.8s ease-in-out infinite;
+}
+
+@keyframes construction {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
