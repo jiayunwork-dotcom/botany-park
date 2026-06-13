@@ -212,6 +212,7 @@ function handleClick(plot: Plot) {
   align-items: center;
   justify-content: center;
   gap: 2px;
+  pointer-events: none;
 }
 
 .construction-icon {
@@ -233,6 +234,7 @@ function handleClick(plot: Plot) {
   height: 100%;
   padding: 2px;
   gap: 1px;
+  pointer-events: none;
 }
 
 .plant-icon {
@@ -268,6 +270,7 @@ function handleClick(plot: Plot) {
 .plot-type-icon {
   font-size: 14px;
   opacity: 0.6;
+  pointer-events: none;
 }
 
 .plot-coord {

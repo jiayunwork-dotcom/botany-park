@@ -17,8 +17,7 @@ const gameStore = useGameStore();
 
 onMounted(async () => {
   try {
-    const savedPlayerId = localStorage.getItem('botany_player_id') || undefined;
-    const { playerId } = await initSocket(savedPlayerId);
+    const { playerId } = await initSocket();
     gameStore.setCurrentPlayer(playerId);
 
     socket.value?.on('game_state', (state) => {

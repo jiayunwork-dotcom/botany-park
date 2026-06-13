@@ -174,6 +174,7 @@ function getHealthClass(health: number) {
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
 }
 
 .construction-icon {
@@ -189,6 +190,7 @@ function getHealthClass(health: number) {
   height: 100%;
   padding: 2px;
   gap: 1px;
+  pointer-events: none;
 }
 
 .plant-icon {
@@ -213,5 +215,6 @@ function getHealthClass(health: number) {
 .plot-type-icon {
   font-size: 12px;
   opacity: 0.6;
+  pointer-events: none;
 }
 </style>

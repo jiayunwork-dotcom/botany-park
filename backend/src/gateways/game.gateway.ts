@@ -39,7 +39,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   handleConnection(client: Socket) {
-    const playerId = client.handshake.query.playerId as string || uuidv4();
+    const playerId = uuidv4();
     this.clients[client.id] = { playerId, gameId: null };
     client.emit('connected', { playerId, socketId: client.id });
   }
@@ -47,9 +47,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleDisconnect(client: Socket) {
     const clientInfo = this.clients[client.id];
     if (clientInfo && clientInfo.gameId) {
-      const game = await this.gameState.removePlayer(clientInfo.gameId, clientInfo.playerId);
-      if (game) {
-        this.broadcastGameState(clientInfo.gameId, game);
+      const game = await this.gameState.getGame(clientInfo.gameId);
+      if (game && game.phase === GamePhase.WAITING) {
+        const updatedGame = await this.gameState.removePlayer(clientInfo.gameId, clientInfo.playerId);
+        if (updatedGame) {
+          this.broadcastGameState(clientInfo.gameId, updatedGame);
+        }
       }
     }
     delete this.clients[client.id];

@@ -11,9 +11,6 @@ export function initSocket(existingPlayerId?: string): Promise<{ playerId: strin
       const options: any = {
         transports: ['websocket', 'polling']
       };
-      if (existingPlayerId) {
-        options.query = { playerId: existingPlayerId };
-      }
 
       const s = io('/game', options);
 
@@ -24,7 +21,7 @@ export function initSocket(existingPlayerId?: string): Promise<{ playerId: strin
 
       s.on('connected', (data: { playerId: string; socketId: string }) => {
         playerId.value = data.playerId;
-        localStorage.setItem('botany_player_id', data.playerId);
+        sessionStorage.setItem('botany_player_id', data.playerId);
         resolve(data);
       });
 
