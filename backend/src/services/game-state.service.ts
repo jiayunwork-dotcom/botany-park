@@ -10,11 +10,13 @@ import {
   Rarity,
   ResearchProject,
   RandomEvent,
-  WeatherForecast
+  WeatherForecast,
+  MarketOrder
 } from '../types/game.types';
 import { RedisService } from './redis.service';
 import { GameFactoryService } from './game-factory.service';
 import { GameEngineService } from './game-engine.service';
+import { TradeService } from './trade.service';
 import { getPlantById, PLANT_DATABASE } from '../data/plants.data';
 import { GAME_CONFIG } from '../config/game.config';
 import { v4 as uuidv4 } from 'uuid';
@@ -26,7 +28,8 @@ export class GameStateService {
   constructor(
     private readonly redis: RedisService,
     private readonly gameFactory: GameFactoryService,
-    private readonly gameEngine: GameEngineService
+    private readonly gameEngine: GameEngineService,
+    private readonly tradeService: TradeService
   ) {}
 
   private getGameKey(gameId: string): string {
@@ -139,6 +142,7 @@ export class GameStateService {
     events: string[];
     randomEvents: RandomEvent[];
     weatherForecast: WeatherForecast;
+    expiredMarketOrders: MarketOrder[];
   } | null> {
     const game = await this.getGame(gameId);
     if (!game || game.phase !== GamePhase.PLAYING) return null;
@@ -146,6 +150,7 @@ export class GameStateService {
 
     const events: string[] = [];
     const randomEvents: RandomEvent[] = [];
+    let expiredMarketOrders: MarketOrder[] = [];
 
     for (const playerId of game.playerOrder) {
       const player = game.players[playerId];
@@ -197,6 +202,15 @@ export class GameStateService {
       }
     }
 
+    const expiryResult = await this.tradeService.processTurnExpiry(gameId, game);
+    expiredMarketOrders = expiryResult.expiredOrders;
+
+    for (const order of expiredMarketOrders) {
+      const species = getPlantById(order.speciesId);
+      const speciesName = species?.name || '未知';
+      events.push(`${order.sellerName} 的 ${order.quantity} 颗 ${speciesName} 种子挂单已过期，种子已退回`);
+    }
+
     for (const playerId of game.playerOrder) {
       game.actionsSubmitted[playerId] = false;
       const player = game.players[playerId];
@@ -216,7 +230,7 @@ export class GameStateService {
     const weatherForecast = this.gameEngine.getWeatherForecast(game);
 
     await this.saveGame(game);
-    return { game, events, randomEvents, weatherForecast };
+    return { game, events, randomEvents, weatherForecast, expiredMarketOrders };
   }
 
   private executePlayerActions(player: PlayerState, game: GameState, events: string[]) {

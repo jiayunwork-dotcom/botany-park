@@ -27,6 +27,9 @@
           <el-tab-pane label="图鉴" name="codex">
             <PlantCodex />
           </el-tab-pane>
+          <el-tab-pane label="交易市场" name="market">
+            <TradeMarket />
+          </el-tab-pane>
         </el-tabs>
 
         <ActionPanel @submit="submitActions" />
@@ -61,6 +64,7 @@ import SeedShop from './SeedShop.vue';
 import GameMap from './GameMap.vue';
 import OtherPlayersView from './OtherPlayersView.vue';
 import PlantCodex from './PlantCodex.vue';
+import TradeMarket from './TradeMarket.vue';
 import ResearchPanel from './ResearchPanel.vue';
 import LeaderboardView from './LeaderboardView.vue';
 import TurnEvents from './TurnEvents.vue';

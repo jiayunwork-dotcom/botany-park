@@ -10,7 +10,8 @@ import type {
   WeatherForecast,
   RandomEvent,
   Plot,
-  MicroClimate
+  MicroClimate,
+  MarketOrder
 } from '../types/game';
 
 export interface SeedSuitability {
@@ -40,6 +41,7 @@ export const useGameStore = defineStore('game', () => {
   const pendingActions = ref<PlayerAction[]>([]);
   const weatherForecast = ref<WeatherForecast | null>(null);
   const pendingRandomEvents = ref<RandomEvent[]>([]);
+  const marketOrders = ref<MarketOrder[]>([]);
 
   const currentPlayer = computed<PlayerState | null>(() => {
     if (!gameState.value || !currentPlayerId.value) return null;
@@ -242,6 +244,15 @@ export const useGameStore = defineStore('game', () => {
     pendingActions.value.splice(index, 1);
   }
 
+  const myOrders = computed(() => {
+    if (!currentPlayerId.value) return [];
+    return marketOrders.value.filter(o => o.sellerId === currentPlayerId.value);
+  });
+
+  function setMarketOrders(orders: MarketOrder[]) {
+    marketOrders.value = orders;
+  }
+
   function reset() {
     gameState.value = null;
     currentPlayerId.value = '';
@@ -250,6 +261,7 @@ export const useGameStore = defineStore('game', () => {
     pendingActions.value = [];
     weatherForecast.value = null;
     pendingRandomEvents.value = [];
+    marketOrders.value = [];
   }
 
   return {
@@ -262,17 +274,20 @@ export const useGameStore = defineStore('game', () => {
     pendingActions,
     weatherForecast,
     pendingRandomEvents,
+    marketOrders,
     currentPlayer,
     isHost,
     isMyTurnReady,
     allPlayersReady,
     seasonConfig,
     nextSeasonConfig,
+    myOrders,
     setGameState,
     setCurrentPlayer,
     setPlantsData,
     setLeaderboard,
     setWeatherForecast,
+    setMarketOrders,
     addPendingRandomEvent,
     clearPendingRandomEvents,
     addTurnEvents,

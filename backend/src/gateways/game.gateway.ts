@@ -10,7 +10,8 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameStateService } from '../services/game-state.service';
 import { GameEngineService } from '../services/game-engine.service';
-import { PlayerAction, GamePhase } from '../types/game.types';
+import { TradeService } from '../services/trade.service';
+import { PlayerAction, GamePhase, MarketOrder } from '../types/game.types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface ClientMap {
@@ -35,7 +36,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     private readonly gameState: GameStateService,
-    private readonly gameEngine: GameEngineService
+    private readonly gameEngine: GameEngineService,
+    private readonly tradeService: TradeService
   ) {}
 
   handleConnection(client: Socket) {
@@ -148,7 +150,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (this.gameState.allActionsSubmitted(game)) {
       const result = await this.gameState.processTurn(clientInfo.gameId);
       if (result) {
-        const { game: updatedGame, events, randomEvents, weatherForecast } = result;
+        const { game: updatedGame, events, randomEvents, weatherForecast, expiredMarketOrders } = result;
         const leaderboard = this.gameEngine.getLeaderboard(updatedGame);
 
         this.server.to(updatedGame.id).emit('turn_processed', {
@@ -157,7 +159,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           events,
           randomEvents,
           weatherForecast,
-          leaderboard
+          leaderboard,
+          expiredMarketOrders
         });
 
         if (updatedGame.phase === GamePhase.FINISHED) {
@@ -167,6 +170,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
 
         this.broadcastGameState(updatedGame.id, updatedGame);
+        this.broadcastMarketUpdate(updatedGame.id);
       }
     } else {
       this.broadcastGameState(game.id, game);
@@ -237,6 +241,117 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.gameState.saveGame(game);
     client.emit('seed_purchased', { speciesId: data.speciesId, quantity: data.quantity });
     this.broadcastGameState(game.id, game);
+  }
+
+  @SubscribeMessage('get_market')
+  async handleGetMarket(
+    @ConnectedSocket() client: Socket
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const orders = await this.tradeService.getMarketOrders(clientInfo.gameId);
+    client.emit('market_update', { orders });
+  }
+
+  @SubscribeMessage('create_order')
+  async handleCreateOrder(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { speciesId: string; quantity: number; unitPrice: number }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.tradeService.createOrder(
+      clientInfo.gameId,
+      game,
+      clientInfo.playerId,
+      data.speciesId,
+      data.quantity,
+      data.unitPrice
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    await this.gameState.saveGame(result.game);
+    client.emit('order_created', { order: result.order });
+    this.broadcastMarketUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, result.game);
+  }
+
+  @SubscribeMessage('cancel_order')
+  async handleCancelOrder(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { orderId: string }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game) return;
+
+    const result = await this.tradeService.cancelOrder(
+      clientInfo.gameId,
+      game,
+      data.orderId,
+      clientInfo.playerId
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    await this.gameState.saveGame(result.game);
+    client.emit('order_cancelled', { order: result.order });
+    this.broadcastMarketUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, result.game);
+  }
+
+  @SubscribeMessage('buy_order')
+  async handleBuyOrder(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { orderId: string }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.tradeService.buyOrder(
+      clientInfo.gameId,
+      game,
+      data.orderId,
+      clientInfo.playerId
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    await this.gameState.saveGame(result.game);
+    client.emit('order_bought', { order: result.order });
+    this.broadcastMarketUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, result.game);
+  }
+
+  private async broadcastMarketUpdate(gameId: string) {
+    const orders = await this.tradeService.getMarketOrders(gameId);
+    this.server.to(gameId).emit('market_update', { orders });
   }
 
   private broadcastGameState(gameId: string, game: any) {

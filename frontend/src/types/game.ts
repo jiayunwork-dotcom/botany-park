@@ -176,3 +176,22 @@ export interface InteractionInfo {
   description: string;
   effect: string;
 }
+
+export enum MarketOrderStatus {
+  ACTIVE = 'active',
+  SOLD = 'sold',
+  EXPIRED = 'expired',
+  CANCELLED = 'cancelled'
+}
+
+export interface MarketOrder {
+  id: string;
+  sellerId: string;
+  sellerName: string;
+  speciesId: string;
+  quantity: number;
+  unitPrice: number;
+  createdAtTurn: number;
+  turnsLeft: number;
+  status: MarketOrderStatus;
+}

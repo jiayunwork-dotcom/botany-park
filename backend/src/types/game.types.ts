@@ -208,3 +208,22 @@ export interface LeaderboardEntry {
   research: number;
   satisfaction: number;
 }
+
+export enum MarketOrderStatus {
+  ACTIVE = 'active',
+  SOLD = 'sold',
+  EXPIRED = 'expired',
+  CANCELLED = 'cancelled'
+}
+
+export interface MarketOrder {
+  id: string;
+  sellerId: string;
+  sellerName: string;
+  speciesId: string;
+  quantity: number;
+  unitPrice: number;
+  createdAtTurn: number;
+  turnsLeft: number;
+  status: MarketOrderStatus;
+}
