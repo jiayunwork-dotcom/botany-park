@@ -148,13 +148,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (this.gameState.allActionsSubmitted(game)) {
       const result = await this.gameState.processTurn(clientInfo.gameId);
       if (result) {
-        const { game: updatedGame, events } = result;
+        const { game: updatedGame, events, randomEvents, weatherForecast } = result;
         const leaderboard = this.gameEngine.getLeaderboard(updatedGame);
 
         this.server.to(updatedGame.id).emit('turn_processed', {
           turn: updatedGame.turn,
           season: updatedGame.season,
           events,
+          randomEvents,
+          weatherForecast,
           leaderboard
         });
 

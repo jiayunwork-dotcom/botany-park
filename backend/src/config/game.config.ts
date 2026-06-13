@@ -52,11 +52,44 @@ export const GAME_CONFIG = {
   },
 
   SEASON: {
-    spring: { light: 60, tempModifier: 0 },
-    summer: { light: 90, tempModifier: 10 },
-    autumn: { light: 50, tempModifier: -5 },
-    winter: { light: 30, tempModifier: -15 }
+    spring: {
+      light: 60,
+      tempModifier: 0,
+      name: '春季',
+      icon: '🌸',
+      description: '光照适中，温度适宜，植物生长开始活跃'
+    },
+    summer: {
+      light: 90,
+      tempModifier: 10,
+      name: '夏季',
+      icon: '☀️',
+      description: '光照充足，高温，植物生长快但水分消耗大'
+    },
+    autumn: {
+      light: 50,
+      tempModifier: -5,
+      name: '秋季',
+      icon: '🍂',
+      description: '光照减少，温度下降，部分植物进入休眠准备'
+    },
+    winter: {
+      light: 30,
+      tempModifier: -15,
+      name: '冬季',
+      icon: '❄️',
+      description: '光照不足，低温，大部分植物生长缓慢或休眠'
+    }
   },
+
+  RANDOM_EVENT_ICONS: {
+    pest: '🐛',
+    weather: '⛈️',
+    media: '📰',
+    policy: '📋'
+  },
+
+  BASE_TEMPERATURE: 20,
 
   GREENHOUSE: {
     lightModifier: 0.7,

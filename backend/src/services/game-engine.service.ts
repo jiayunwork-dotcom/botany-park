@@ -7,7 +7,9 @@ import {
   Season,
   PlotType,
   PlantSpecies,
-  LeaderboardEntry
+  LeaderboardEntry,
+  WeatherForecast,
+  SeasonEnvironment
 } from '../types/game.types';
 import { getPlantById } from '../data/plants.data';
 import { GAME_CONFIG } from '../config/game.config';
@@ -397,5 +399,62 @@ export class GameEngineService {
     const players = Object.values(game.players);
     const entries = players.map(p => this.calculatePlayerScore(p, game));
     return entries.sort((a, b) => b.score - a.score);
+  }
+
+  private getSeasonEnvironment(season: Season): SeasonEnvironment {
+    const config = GAME_CONFIG.SEASON[season];
+    return {
+      light: config.light,
+      tempModifier: config.tempModifier,
+      temp: GAME_CONFIG.BASE_TEMPERATURE + config.tempModifier
+    };
+  }
+
+  getWeatherForecast(game: GameState): WeatherForecast {
+    const currentSeason = game.season;
+    const nextSeason = this.advanceSeason(currentSeason);
+
+    const currentConfig = GAME_CONFIG.SEASON[currentSeason];
+    const nextConfig = GAME_CONFIG.SEASON[nextSeason];
+
+    const turnsPerYear = GAME_CONFIG.TURNS_PER_YEAR;
+    const currentTurnInYear = (game.turn - 1) % turnsPerYear;
+    const seasonProgress = ((currentTurnInYear + 1) / turnsPerYear) * 25;
+
+    return {
+      currentSeason,
+      currentSeasonName: currentConfig.name,
+      currentEnvironment: this.getSeasonEnvironment(currentSeason),
+      nextSeason,
+      nextSeasonName: nextConfig.name,
+      nextEnvironment: this.getSeasonEnvironment(nextSeason),
+      seasonProgress
+    };
+  }
+
+  calculateSuitabilityForPlantAndPlot(
+    speciesId: string,
+    plot: Plot,
+    game: GameState
+  ): number {
+    const species = getPlantById(speciesId) || game.allSpecies[speciesId];
+    if (!species) return 0;
+
+    const climate = this.getEffectiveClimate(plot, game);
+    const lightFactor = this.calculateEnvironmentFactor(
+      climate.light, species.lightRange[0], species.lightRange[1]
+    );
+    const waterFactor = this.calculateEnvironmentFactor(
+      climate.humidity, species.waterRange[0], species.waterRange[1]
+    );
+    const tempFactor = this.calculateEnvironmentFactor(
+      climate.temp, species.tempRange[0], species.tempRange[1]
+    );
+    const phFactor = this.calculateEnvironmentFactor(
+      climate.ph, species.phRange[0], species.phRange[1]
+    );
+
+    const score = Math.round((lightFactor * waterFactor * tempFactor * phFactor) * 100);
+    return Math.max(0, Math.min(100, score));
   }
 }

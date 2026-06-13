@@ -9,7 +9,8 @@ import {
   PlantSpecies,
   Rarity,
   ResearchProject,
-  RandomEvent
+  RandomEvent,
+  WeatherForecast
 } from '../types/game.types';
 import { RedisService } from './redis.service';
 import { GameFactoryService } from './game-factory.service';
@@ -133,12 +134,18 @@ export class GameStateService {
     });
   }
 
-  async processTurn(gameId: string): Promise<{ game: GameState; events: string[] } | null> {
+  async processTurn(gameId: string): Promise<{
+    game: GameState;
+    events: string[];
+    randomEvents: RandomEvent[];
+    weatherForecast: WeatherForecast;
+  } | null> {
     const game = await this.getGame(gameId);
     if (!game || game.phase !== GamePhase.PLAYING) return null;
     if (!this.allActionsSubmitted(game)) return null;
 
     const events: string[] = [];
+    const randomEvents: RandomEvent[] = [];
 
     for (const playerId of game.playerOrder) {
       const player = game.players[playerId];
@@ -173,7 +180,7 @@ export class GameStateService {
       this.processResearch(player, game, events);
     }
 
-    this.processRandomEvents(game, events);
+    this.processRandomEvents(game, events, randomEvents);
 
     for (const playerId of game.playerOrder) {
       const player = game.players[playerId];
@@ -206,8 +213,10 @@ export class GameStateService {
       events.push('游戏结束！最终排名已生成');
     }
 
+    const weatherForecast = this.gameEngine.getWeatherForecast(game);
+
     await this.saveGame(game);
-    return { game, events };
+    return { game, events, randomEvents, weatherForecast };
   }
 
   private executePlayerActions(player: PlayerState, game: GameState, events: string[]) {
@@ -491,66 +500,103 @@ export class GameStateService {
     return species;
   }
 
-  private processRandomEvents(game: GameState, events: string[]) {
-    if (Math.random() < 0.3) {
+  private processRandomEvents(game: GameState, events: string[], randomEvents: RandomEvent[]) {
+    if (Math.random() < 0.4) {
       const eventTypes = ['pest', 'weather', 'media', 'policy'] as const;
       const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
       const severity = Math.ceil(Math.random() * 3);
 
       let description = '';
       let affected: string[] = [];
+      let detailedDescription = '';
 
       switch (eventType) {
         case 'pest':
-          description = `虫害爆发！严重等级: ${severity}`;
+          const pestTypes = ['蚜虫入侵', '真菌感染', '虫害爆发'];
+          const pestName = pestTypes[Math.floor(Math.random() * pestTypes.length)];
+          description = `${pestName}！严重等级: ${severity}`;
+          detailedDescription = `${pestName}正在侵袭植物园，受影响的植物健康值下降，需要支付额外的治理费用。`;
           affected = Object.keys(game.players);
           for (const pid of affected) {
             const player = game.players[pid];
             if (!player.isBankrupt) {
+              let affectedPlants = 0;
               for (let y = 0; y < GAME_CONFIG.GRID_SIZE; y++) {
                 for (let x = 0; x < GAME_CONFIG.GRID_SIZE; x++) {
                   if (player.plots[y][x].plant && Math.random() < severity * 0.1) {
                     player.plots[y][x].plant!.health -= severity * 15;
+                    affectedPlants++;
                   }
                 }
               }
-              player.money -= severity * 100;
+              const cost = severity * 100;
+              player.money -= cost;
+              if (affectedPlants > 0) {
+                detailedDescription += ` ${player.name}有${affectedPlants}株植物受影响，支付治理费${cost}金币。`;
+              }
             }
           }
           break;
         case 'weather':
-          const weathers = ['暴雨', '干旱', '寒潮', '热浪'];
-          description = `极端天气: ${weathers[Math.floor(Math.random() * weathers.length)]}，等级: ${severity}`;
+          const weathers = [
+            { name: '暴雨', effect: '持续降雨导致土壤过湿，部分植物根系受损' },
+            { name: '干旱', effect: '持续高温少雨，水分蒸发加剧，植物缺水' },
+            { name: '寒潮', effect: '气温骤降，耐寒性差的植物受到冻害' },
+            { name: '热浪', effect: '极端高温天气，植物蒸腾作用过强' }
+          ];
+          const weather = weathers[Math.floor(Math.random() * weathers.length)];
+          description = `极端天气: ${weather.name}，等级: ${severity}`;
+          detailedDescription = `${weather.effect}。严重等级${severity}级，影响所有玩家。`;
           affected = Object.keys(game.players);
           break;
         case 'media':
           const mediaPlayers = Object.keys(game.players).filter(pid => !game.players[pid].isBankrupt);
           if (mediaPlayers.length > 0) {
             const luckyPlayer = mediaPlayers[Math.floor(Math.random() * mediaPlayers.length)];
-            description = `媒体报道: ${game.players[luckyPlayer].name} 的植物园受到关注！`;
-            game.players[luckyPlayer].money += severity * 200;
+            const mediaTypes = ['旅游博主推荐', '本地新闻报道', '社交媒体走红', '电视台专访'];
+            const mediaType = mediaTypes[Math.floor(Math.random() * mediaTypes.length)];
+            const reward = severity * 200;
+            description = `${mediaType}: ${game.players[luckyPlayer].name} 的植物园受到关注！`;
+            detailedDescription = `${mediaType}让${game.players[luckyPlayer].name}的植物园知名度大增，获得${reward}金币的额外收入！`;
+            game.players[luckyPlayer].money += reward;
             affected = [luckyPlayer];
           }
           break;
         case 'policy':
-          description = `政策调整: 植物园补贴 ${severity * 100} 金币`;
+          const policyTypes = [
+            { name: '政府补贴', desc: '政府出台新政策扶持园林产业' },
+            { name: '环保奖励', desc: '植物园在生态保护方面的贡献获得表彰' },
+            { name: '旅游推广', desc: '本地旅游局将植物园列为推荐景点' }
+          ];
+          const policy = policyTypes[Math.floor(Math.random() * policyTypes.length)];
+          const subsidy = severity * 100;
+          description = `政策调整: ${policy.name}，补贴 ${subsidy} 金币`;
+          detailedDescription = `${policy.desc}，每位玩家获得${subsidy}金币补贴。`;
           affected = Object.keys(game.players);
           for (const pid of affected) {
             if (!game.players[pid].isBankrupt) {
-              game.players[pid].money += severity * 100;
+              game.players[pid].money += subsidy;
             }
           }
           break;
       }
 
       if (description) {
-        events.push(`【随机事件】${description}`);
-        game.currentEvents.push({
+        const icon = GAME_CONFIG.RANDOM_EVENT_ICONS[eventType];
+        const affectedPlayerNames = affected.map(pid => game.players[pid]?.name || '未知玩家');
+
+        const event: RandomEvent = {
           type: eventType,
           severity,
-          description,
-          affects: affected
-        });
+          description: detailedDescription || description,
+          affects: affected,
+          affectedPlayerNames,
+          icon
+        };
+
+        events.push(`【随机事件】${description}`);
+        randomEvents.push(event);
+        game.currentEvents.push(event);
       }
     }
   }

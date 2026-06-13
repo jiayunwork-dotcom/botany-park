@@ -38,6 +38,31 @@ export enum Rarity {
   LEGENDARY = 'legendary'
 }
 
+export interface SeasonEnvironment {
+  light: number;
+  tempModifier: number;
+  temp: number;
+}
+
+export interface WeatherForecast {
+  currentSeason: Season;
+  currentSeasonName: string;
+  currentEnvironment: SeasonEnvironment;
+  nextSeason: Season;
+  nextSeasonName: string;
+  nextEnvironment: SeasonEnvironment;
+  seasonProgress: number;
+}
+
+export interface RandomEvent {
+  type: 'pest' | 'weather' | 'media' | 'policy';
+  severity: number;
+  description: string;
+  affects: string[];
+  affectedPlayerNames?: string[];
+  icon: string;
+}
+
 export interface MicroClimate {
   light: number;
   humidity: number;

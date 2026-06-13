@@ -12,6 +12,7 @@ import GameLobby from './components/GameLobby.vue';
 import GameBoard from './components/GameBoard.vue';
 import { useGameStore } from './stores/game';
 import { initSocket, socket } from './services/socket';
+import type { RandomEvent, WeatherForecast } from './types/game';
 
 const gameStore = useGameStore();
 
@@ -32,10 +33,25 @@ onMounted(async () => {
       ElMessage.error(data.message);
     });
 
-    socket.value?.on('turn_processed', (data) => {
+    socket.value?.on('turn_processed', (data: {
+      events: string[];
+      randomEvents: RandomEvent[];
+      weatherForecast: WeatherForecast;
+      leaderboard: any[];
+    }) => {
       gameStore.addTurnEvents(data.events);
       gameStore.setLeaderboard(data.leaderboard);
       gameStore.clearPendingActions();
+
+      if (data.weatherForecast) {
+        gameStore.setWeatherForecast(data.weatherForecast);
+      }
+
+      if (data.randomEvents && data.randomEvents.length > 0) {
+        data.randomEvents.forEach(event => {
+          gameStore.addPendingRandomEvent(event);
+        });
+      }
     });
 
     socket.value?.on('game_started', () => {

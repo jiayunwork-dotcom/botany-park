@@ -129,11 +129,36 @@ export interface SeedShopItem {
   price: number;
 }
 
+export interface SeasonEnvironment {
+  light: number;
+  tempModifier: number;
+  temp: number;
+}
+
+export interface WeatherForecast {
+  currentSeason: Season;
+  currentSeasonName: string;
+  currentEnvironment: SeasonEnvironment;
+  nextSeason: Season;
+  nextSeasonName: string;
+  nextEnvironment: SeasonEnvironment;
+  seasonProgress: number;
+}
+
 export interface RandomEvent {
   type: 'pest' | 'weather' | 'media' | 'policy';
   severity: number;
   description: string;
   affects: string[];
+  affectedPlayerNames?: string[];
+  icon: string;
+}
+
+export interface TurnResult {
+  game: GameState;
+  events: string[];
+  randomEvents: RandomEvent[];
+  weatherForecast: WeatherForecast;
 }
 
 export interface GameState {

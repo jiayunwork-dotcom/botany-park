@@ -47,6 +47,8 @@
         @action="handlePlotAction"
       />
     </el-dialog>
+
+    <EventNotification />
   </div>
 </template>
 
@@ -64,6 +66,7 @@ import LeaderboardView from './LeaderboardView.vue';
 import TurnEvents from './TurnEvents.vue';
 import ActionPanel from './ActionPanel.vue';
 import PlotActionDialog from './PlotActionDialog.vue';
+import EventNotification from './EventNotification.vue';
 import { useGameStore } from '../stores/game';
 import { socket } from '../services/socket';
 import type { Plot, PlayerAction } from '../types/game';
