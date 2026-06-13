@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useGameStore } from '../stores/game';
 import { socket } from '../services/socket';
@@ -52,6 +52,19 @@ const player = computed(() => gameStore.currentPlayer);
 const shopItems = computed(() => {
   if (!gameStore.gameState || !gameStore.currentPlayerId) return [];
   return gameStore.gameState.seedShop[gameStore.currentPlayerId] || [];
+});
+
+function handleSeedPurchased(data: { speciesId: string; quantity: number }) {
+  const species = gameStore.allSpecies[data.speciesId];
+  ElMessage.success(`成功购买 ${species?.icon || '🌱'} ${species?.name || '种子'} x${data.quantity}！`);
+}
+
+onMounted(() => {
+  socket.value?.on('seed_purchased', handleSeedPurchased);
+});
+
+onUnmounted(() => {
+  socket.value?.off('seed_purchased', handleSeedPurchased);
 });
 
 function getSpecies(id: string) {

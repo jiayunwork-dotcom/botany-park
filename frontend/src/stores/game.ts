@@ -32,7 +32,10 @@ export const useGameStore = defineStore('game', () => {
   });
 
   function setGameState(state: GameState) {
-    gameState.value = state;
+    gameState.value = JSON.parse(JSON.stringify(state));
+    if (state.allSpecies) {
+      allSpecies.value = { ...allSpecies.value, ...state.allSpecies };
+    }
   }
 
   function setCurrentPlayer(id: string) {

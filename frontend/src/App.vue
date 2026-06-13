@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <GameLobby v-if="!gameStore.gameState" />
+    <GameLobby v-if="!gameStore.gameState || gameStore.gameState.phase === 'waiting'" />
     <GameBoard v-else />
   </div>
 </template>
@@ -23,9 +23,6 @@ onMounted(async () => {
 
     socket.value?.on('game_state', (state) => {
       gameStore.setGameState(state);
-      if (state.allSpecies) {
-        gameStore.allSpecies = { ...gameStore.allSpecies, ...state.allSpecies };
-      }
     });
 
     socket.value?.on('plants_data', (data) => {

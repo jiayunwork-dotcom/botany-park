@@ -11,7 +11,15 @@
       <div class="center-panel">
         <el-tabs v-model="activeTab" class="map-tabs">
           <el-tab-pane label="我的植物园" name="mine">
-            <GameMap :player="gameStore.currentPlayer!" :isMine="true" @plot-click="handlePlotClick" />
+            <div v-if="!gameStore.currentPlayer" class="loading">
+              <el-loading fullscreen-text="加载中..." />
+            </div>
+            <GameMap
+              v-else
+              :player="gameStore.currentPlayer"
+              :isMine="true"
+              @plot-click="handlePlotClick"
+            />
           </el-tab-pane>
           <el-tab-pane label="其他玩家" name="others">
             <OtherPlayersView />
@@ -69,12 +77,20 @@ const selectedPlot = ref<Plot | null>(null);
 const isPlaying = computed(() => gameStore.gameState?.phase === 'playing');
 
 function handlePlotClick(plot: Plot) {
-  if (!isPlaying.value || gameStore.isMyTurnReady) {
-    ElMessage.info('请等待下一回合或提交操作');
+  if (!isPlaying.value) {
+    ElMessage.warning('游戏尚未开始，请等待房主开始游戏');
+    return;
+  }
+  if (gameStore.isMyTurnReady) {
+    ElMessage.info('你已提交本回合操作，请等待其他玩家');
     return;
   }
   if (gameStore.currentPlayer?.isBankrupt) {
     ElMessage.warning('你已破产，无法操作');
+    return;
+  }
+  if (plot.constructionTurnsLeft > 0) {
+    ElMessage.info('该地块正在施工中，请等待完成');
     return;
   }
   selectedPlot.value = plot;
@@ -157,5 +173,12 @@ async function submitActions() {
   flex: 1;
   overflow: auto;
   padding: 12px;
+}
+
+.loading {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>
