@@ -216,6 +216,21 @@ export class AuctionService {
     }
   }
 
+  getPlayerHighestActiveBid(auction: Auction, playerId: string): AuctionBid | null {
+    const activeBids = this.getActiveBids(auction).filter(b => b.bidderId === playerId);
+    if (activeBids.length === 0) return null;
+    return activeBids.reduce((max, bid) => bid.amount > max.amount ? bid : max, activeBids[0]);
+  }
+
+  calculatePlayerAuctionCommitment(proxyBid: ProxyBid | undefined, highestBid: AuctionBid | null): number {
+    if (proxyBid && highestBid) {
+      return Math.max(proxyBid.maxPrice, highestBid.amount);
+    }
+    if (proxyBid) return proxyBid.maxPrice;
+    if (highestBid) return highestBid.amount;
+    return 0;
+  }
+
   async getPlayerTotalCommittedBids(
     gameId: string,
     playerId: string
@@ -227,13 +242,14 @@ export class AuctionService {
       if (auction.status !== AuctionStatus.ACTIVE) continue;
 
       const proxyBid = auction.proxyBids.find(p => p.bidderId === playerId);
-      if (proxyBid) {
-        total += proxyBid.maxPrice;
-        continue;
-      }
+      const playerHighestBid = this.getPlayerHighestActiveBid(auction, playerId);
 
-      if (auction.currentHighBidderId === playerId) {
-        total += auction.currentHighBid;
+      if (proxyBid && playerHighestBid) {
+        total += Math.max(proxyBid.maxPrice, playerHighestBid.amount);
+      } else if (proxyBid) {
+        total += proxyBid.maxPrice;
+      } else if (playerHighestBid) {
+        total += playerHighestBid.amount;
       }
     }
 
@@ -260,7 +276,7 @@ export class AuctionService {
 
     const activeBids = this.getActiveBids(auction);
     const otherActiveBids = activeBids.filter(b => b.bidderId !== bidderId);
-    if (otherActiveBids.length === 0 && activeBids.length <= 1) {
+    if (otherActiveBids.length === 0) {
       return { error: '你是唯一出价者，无法撤回出价' };
     }
 
@@ -401,13 +417,14 @@ export class AuctionService {
     const existingProxyBid = auction.proxyBids.find(p => p.bidderId === bidderId);
     const myHighestBid = this.getPlayerHighestActiveBid(auction, bidderId);
 
-    if (existingProxyBid) {
-      newCommitted = playerCommitted - existingProxyBid.maxPrice + Math.max(bidAmount, existingProxyBid.maxPrice);
-    } else if (myHighestBid) {
-      newCommitted = playerCommitted - myHighestBid.amount + bidAmount;
-    } else {
-      newCommitted = playerCommitted + bidAmount;
-    }
+    const oldCommitment = this.calculatePlayerAuctionCommitment(existingProxyBid, myHighestBid);
+    const newMyHighestBidAmount = Math.max(myHighestBid?.amount || 0, bidAmount);
+    const newCommitment = this.calculatePlayerAuctionCommitment(
+      existingProxyBid,
+      { amount: newMyHighestBidAmount } as AuctionBid
+    );
+
+    newCommitted = playerCommitted - oldCommitment + newCommitment;
 
     if (bidder.money < newCommitted) {
       return { error: `余额不足，当前可用余额：${bidder.money} 金币，参与拍卖总承诺金额需：${newCommitted} 金币` };
