@@ -155,7 +155,10 @@ async function submitActions() {
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
+  overflow-x: hidden;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .center-panel {
@@ -165,6 +168,8 @@ async function submitActions() {
   gap: 12px;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+  z-index: 2;
 }
 
 .map-tabs {
@@ -174,12 +179,33 @@ async function submitActions() {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.map-tabs :deep(.el-tabs) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.map-tabs :deep(.el-tabs__header) {
+  flex-shrink: 0;
+  margin-bottom: 0;
 }
 
 .map-tabs :deep(.el-tabs__content) {
   flex: 1;
   overflow: auto;
   padding: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.map-tabs :deep(.el-tab-pane) {
+  height: 100%;
 }
 
 .loading {

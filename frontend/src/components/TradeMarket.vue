@@ -382,16 +382,27 @@ onUnmounted(() => {
 
 <style scoped>
 .trade-market {
+  width: 100%;
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
 }
 
 .market-header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 2;
 }
 
 .market-header h2 {
@@ -401,23 +412,33 @@ onUnmounted(() => {
 }
 
 .market-filters {
+  flex-shrink: 0;
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 2;
 }
 
 .market-section {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   background: #fff;
   border-radius: 8px;
   padding: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
 }
 
 .market-section h3 {
+  flex-shrink: 0;
   margin: 0 0 10px 0;
   font-size: 14px;
   color: #333;
@@ -430,6 +451,7 @@ onUnmounted(() => {
   justify-content: center;
   color: #999;
   font-size: 14px;
+  min-height: 80px;
 }
 
 .species-cell {
@@ -470,7 +492,8 @@ onUnmounted(() => {
 }
 
 :deep(.el-table) {
-  flex: 1;
-  overflow: auto;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
 }
 </style>
