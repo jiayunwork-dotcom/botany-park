@@ -313,7 +313,7 @@
             size="large"
             style="width: 100%"
           />
-          <span class="form-hint">至少出价 {{ minBidAmount }} 金币（当前价 + 加价幅度）</span>
+          <span class="form-hint">至少出价 {{ minBidAmount }} 金币（{{ bidHint }}）</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -536,7 +536,18 @@ const availableForThisAuction = computed(() => {
 
 const minBidAmount = computed(() => {
   if (!bidTargetAuction.value) return 0;
+  const hasBids = bidTargetAuction.value.bids && bidTargetAuction.value.bids.length > 0;
+  if (!hasBids) {
+    return bidTargetAuction.value.startPrice;
+  }
   return bidTargetAuction.value.currentHighBid + bidTargetAuction.value.minIncrement;
+});
+
+const bidHint = computed(() => {
+  if (!bidTargetAuction.value) return '';
+  const hasBids = bidTargetAuction.value.bids && bidTargetAuction.value.bids.length > 0;
+  if (!hasBids) return '起拍价';
+  return '当前最高价 + 最低加价';
 });
 
 const canSubmitBid = computed(() => {

@@ -208,9 +208,14 @@ export class AuctionService {
     if (!bidder) return { error: '玩家不存在' };
     if (bidder.isBankrupt) return { error: '破产玩家无法参与竞价' };
 
-    const minRequiredBid = auction.currentHighBid + auction.minIncrement;
+    const minRequiredBid = auction.bids.length === 0
+      ? auction.startPrice
+      : auction.currentHighBid + auction.minIncrement;
     if (bidAmount < minRequiredBid) {
-      return { error: `出价必须至少为 ${minRequiredBid} 金币（当前最高价 + 最低加价）` };
+      const hint = auction.bids.length === 0
+        ? '起拍价'
+        : `当前最高价 + 最低加价`;
+      return { error: `出价必须至少为 ${minRequiredBid} 金币（${hint}）` };
     }
 
     const playerCommitted = await this.getPlayerTotalCommittedBids(gameId, bidderId);
@@ -314,7 +319,16 @@ export class AuctionService {
     }
 
     const taxRate = game.tradeTaxRate ?? this.DEFAULT_TAX_RATE;
-    const sortedBids = [...storedAuction.bids].sort((a, b) => b.amount - a.amount);
+
+    const playerHighestBid = new Map<string, AuctionBid>();
+    for (const bid of storedAuction.bids) {
+      const existing = playerHighestBid.get(bid.bidderId);
+      if (!existing || bid.amount > existing.amount) {
+        playerHighestBid.set(bid.bidderId, bid);
+      }
+    }
+
+    const sortedUniqueBids = [...playerHighestBid.values()].sort((a, b) => b.amount - a.amount);
 
     let winner: PlayerState | null = null;
     let winningBid: AuctionBid | null = null;
@@ -322,7 +336,7 @@ export class AuctionService {
     let taxAmount = 0;
     let sellerReceive = 0;
 
-    for (const bid of sortedBids) {
+    for (const bid of sortedUniqueBids) {
       const bidder = game.players[bid.bidderId];
       if (!bidder || bidder.isBankrupt) continue;
       if (bidder.money < bid.amount) continue;
@@ -419,6 +433,7 @@ export class AuctionService {
     const auctions = await this.getAuctions(gameId);
     const settledResults: AuctionSettlementResult[] = [];
     const expiredAuctions: Auction[] = [];
+    const expiredAuctionIds: string[] = [];
 
     const activeAuctions = auctions.filter(a => a.status === AuctionStatus.ACTIVE);
 
@@ -427,14 +442,17 @@ export class AuctionService {
 
       if (auction.turnsLeft <= 0) {
         expiredAuctions.push(auction);
-        const settleResult = await this.settleAuction(gameId, game, auction);
-        game = settleResult.game;
-        settledResults.push(settleResult.result);
+        expiredAuctionIds.push(auction.id);
       }
     }
 
-    const currentAuctions = await this.getAuctions(gameId);
-    await this.saveAuctions(gameId, currentAuctions);
+    await this.saveAuctions(gameId, auctions);
+
+    for (const expiredAuction of expiredAuctions) {
+      const settleResult = await this.settleAuction(gameId, game, expiredAuction);
+      game = settleResult.game;
+      settledResults.push(settleResult.result);
+    }
 
     return { game, settledResults, expiredAuctions };
   }
