@@ -36,6 +36,7 @@ export class TradeService {
   }
 
   async getMarketOrders(gameId: string): Promise<MarketOrder[]> {
+    await this.cleanExpiredNegotiations(gameId);
     const orders = await this.redis.getJSON<MarketOrder[]>(this.getMarketKey(gameId));
     return orders || [];
   }
@@ -56,7 +57,7 @@ export class TradeService {
   async addTradeRecord(
     gameId: string,
     record: Omit<TradeHistoryRecord, 'id' | 'timestamp'>
-  ): Promise<void> {
+  ): Promise<string> {
     const history = await this.getTradeHistory(gameId);
     const newRecord: TradeHistoryRecord = {
       ...record,
@@ -65,6 +66,14 @@ export class TradeService {
     };
     history.push(newRecord);
     await this.saveTradeHistory(gameId, history);
+    return newRecord.id;
+  }
+
+  async removeTradeRecords(gameId: string, recordIds: string[]): Promise<void> {
+    if (recordIds.length === 0) return;
+    const history = await this.getTradeHistory(gameId);
+    const filteredHistory = history.filter(r => !recordIds.includes(r.id));
+    await this.saveTradeHistory(gameId, filteredHistory);
   }
 
   async clearMarket(gameId: string): Promise<void> {
@@ -268,7 +277,7 @@ export class TradeService {
     order.currentNegotiation = null;
     await this.saveMarketOrders(gameId, orders);
 
-    await this.addTradeRecord(gameId, {
+    void this.addTradeRecord(gameId, {
       speciesId: order.speciesId,
       sellerId: order.sellerId,
       buyerId,
@@ -290,7 +299,9 @@ export class TradeService {
   ): Promise<{ game: GameState; orders: MarketOrder[]; totalCost: number; totalTax: number } | { error: string }> {
     if (orderIds.length === 0) return { error: '请选择要购买的挂单' };
 
-    const orders = await this.getMarketOrders(gameId);
+    await this.cleanExpiredNegotiations(gameId);
+
+    const orders = await this.redis.getJSON<MarketOrder[]>(this.getMarketKey(gameId)) || [];
     const targetOrders: MarketOrder[] = [];
 
     for (const orderId of orderIds) {
@@ -310,11 +321,22 @@ export class TradeService {
 
     const taxRate = game.tradeTaxRate ?? this.DEFAULT_TAX_RATE;
     let totalTax = 0;
-    const gameSnapshot = JSON.parse(JSON.stringify(game));
-    const ordersSnapshot = JSON.parse(JSON.stringify(orders));
+    const tradeRecordIds: string[] = [];
+    const sellerChanges: Map<string, number> = new Map();
+    const buyerSeedChanges: Map<string, number> = new Map();
+    const buyerDiscoveredNew: string[] = [];
+    const originalBuyerMoney = buyer.money;
+    const originalPublicFunds = game.publicFunds || 0;
+    const executedOrderIds: string[] = [];
 
     try {
       for (const order of targetOrders) {
+        const freshOrders = await this.redis.getJSON<MarketOrder[]>(this.getMarketKey(gameId)) || [];
+        const currentOrder = freshOrders.find(o => o.id === order.id);
+        if (!currentOrder || currentOrder.status !== MarketOrderStatus.ACTIVE) {
+          throw new Error(`挂单 ${order.id} 已被他人购买或失效，交易回滚`);
+        }
+
         const seller = game.players[order.sellerId];
         if (!seller) throw new Error('卖家不存在');
 
@@ -322,19 +344,30 @@ export class TradeService {
         const taxAmount = this.calculateTax(orderTotal, taxRate);
         const sellerReceive = this.calculateSellerReceive(orderTotal, taxRate);
 
+        if (!sellerChanges.has(order.sellerId)) {
+          sellerChanges.set(order.sellerId, seller.money);
+        }
         seller.money += sellerReceive;
         totalTax += taxAmount;
 
+        if (!buyerSeedChanges.has(order.speciesId)) {
+          buyerSeedChanges.set(order.speciesId, buyer.ownedSeeds[order.speciesId] || 0);
+        }
         buyer.ownedSeeds[order.speciesId] = (buyer.ownedSeeds[order.speciesId] || 0) + order.quantity;
 
-        if (!buyer.discoveredSpecies.includes(order.speciesId)) {
+        const wasDiscovered = buyer.discoveredSpecies.includes(order.speciesId);
+        if (!wasDiscovered) {
           buyer.discoveredSpecies.push(order.speciesId);
+          buyerDiscoveredNew.push(order.speciesId);
         }
 
-        order.status = MarketOrderStatus.SOLD;
-        order.currentNegotiation = null;
+        const orderInList = orders.find(o => o.id === order.id);
+        if (orderInList) {
+          orderInList.status = MarketOrderStatus.SOLD;
+          orderInList.currentNegotiation = null;
+        }
 
-        await this.addTradeRecord(gameId, {
+        const recordId = await this.addTradeRecord(gameId, {
           speciesId: order.speciesId,
           sellerId: order.sellerId,
           buyerId,
@@ -344,21 +377,54 @@ export class TradeService {
           taxAmount,
           turn: game.turn
         });
+        tradeRecordIds.push(recordId);
+        executedOrderIds.push(order.id);
       }
 
       buyer.money -= totalCost;
-      game.publicFunds = (game.publicFunds || 0) + totalTax;
+      game.publicFunds = originalPublicFunds + totalTax;
 
       await this.saveMarketOrders(gameId, orders);
 
       return { game, orders: targetOrders, totalCost, totalTax };
     } catch (e) {
-      Object.assign(game, gameSnapshot);
-      const orderList = await this.getMarketOrders(gameId);
-      for (let i = 0; i < orderList.length; i++) {
-        orderList[i] = ordersSnapshot[i];
+      for (const [sellerId, originalMoney] of sellerChanges.entries()) {
+        const seller = game.players[sellerId];
+        if (seller) {
+          seller.money = originalMoney;
+        }
       }
-      await this.saveMarketOrders(gameId, orderList);
+
+      for (const [speciesId, originalCount] of buyerSeedChanges.entries()) {
+        buyer.ownedSeeds[speciesId] = originalCount;
+      }
+
+      for (const speciesId of buyerDiscoveredNew) {
+        const idx = buyer.discoveredSpecies.indexOf(speciesId);
+        if (idx > -1) {
+          buyer.discoveredSpecies.splice(idx, 1);
+        }
+      }
+
+      buyer.money = originalBuyerMoney;
+      game.publicFunds = originalPublicFunds;
+
+      if (tradeRecordIds.length > 0) {
+        await this.removeTradeRecords(gameId, tradeRecordIds);
+      }
+
+      const originalOrders = JSON.parse(JSON.stringify(
+        await this.redis.getJSON<MarketOrder[]>(this.getMarketKey(gameId)) || []
+      ));
+      for (let i = 0; i < originalOrders.length; i++) {
+        const originalOrder = originalOrders[i];
+        if (executedOrderIds.includes(originalOrder.id)) {
+          originalOrder.status = MarketOrderStatus.ACTIVE;
+          originalOrder.currentNegotiation = null;
+        }
+      }
+      await this.saveMarketOrders(gameId, originalOrders);
+
       return { error: e.message || '批量购买失败，交易已回滚' };
     }
   }
@@ -494,7 +560,7 @@ export class TradeService {
 
     await this.saveMarketOrders(gameId, orders);
 
-    await this.addTradeRecord(gameId, {
+    void this.addTradeRecord(gameId, {
       speciesId: order.speciesId,
       sellerId,
       buyerId: buyer.id,
@@ -509,7 +575,7 @@ export class TradeService {
   }
 
   async cleanExpiredNegotiations(gameId: string): Promise<{ expiredCount: number }> {
-    const orders = await this.getMarketOrders(gameId);
+    const orders = await this.redis.getJSON<MarketOrder[]>(this.getMarketKey(gameId)) || [];
     let expiredCount = 0;
     const now = Date.now();
 
