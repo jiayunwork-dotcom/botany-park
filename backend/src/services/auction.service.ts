@@ -191,12 +191,6 @@ export class AuctionService {
     return this.getActiveBids(auction).filter(b => b.bidderId === playerId);
   }
 
-  getPlayerHighestActiveBid(auction: Auction, playerId: string): AuctionBid | null {
-    const playerBids = this.getPlayerActiveBids(auction, playerId);
-    if (playerBids.length === 0) return null;
-    return playerBids.reduce((max, bid) => bid.amount > max.amount ? bid : max, playerBids[0]);
-  }
-
   getCurrentHighestBid(auction: Auction): AuctionBid | null {
     const activeBids = this.getActiveBids(auction);
     if (activeBids.length === 0) return null;
@@ -307,66 +301,145 @@ export class AuctionService {
     const autoBids: AuctionBid[] = [];
     let settledResult: AuctionSettlementResult | undefined;
 
-    let continueProcessing = true;
-    let iterations = 0;
-    const maxIterations = 100;
+    let auctions = await this.getAuctions(gameId);
+    let auctionIdx = auctions.findIndex(a => a.id === auctionId);
+    if (auctionIdx === -1) {
+      return { auction: {} as Auction, autoBids, settled: settledResult };
+    }
+    let auction = auctions[auctionIdx];
 
-    while (continueProcessing && iterations < maxIterations) {
-      iterations++;
-      continueProcessing = false;
+    if (auction.status !== AuctionStatus.ACTIVE) {
+      return { auction, autoBids, settled: settledResult };
+    }
 
-      const auctions = await this.getAuctions(gameId);
-      const auctionIndex = auctions.findIndex(a => a.id === auctionId);
-      if (auctionIndex === -1) break;
-      const auction = auctions[auctionIndex];
+    if (auction.proxyBids.length === 0) {
+      return { auction, autoBids, settled: settledResult };
+    }
 
-      if (auction.status !== AuctionStatus.ACTIVE) break;
+    const highestBid = this.getCurrentHighestBid(auction);
+    const currentHigh = highestBid ? highestBid.amount : auction.startPrice - auction.minIncrement;
+    const currentHighBidderId = highestBid?.bidderId || '';
+    const inc = auction.minIncrement;
 
-      const highestBid = this.getCurrentHighestBid(auction);
-      const currentHigh = highestBid ? highestBid.amount : auction.startPrice - auction.minIncrement;
-      const currentHighBidderId = highestBid?.bidderId || '';
+    const eligibleProxies = auction.proxyBids
+      .filter(p => p.bidderId !== currentHighBidderId)
+      .filter(p => p.maxPrice >= currentHigh + inc)
+      .sort((a, b) => b.maxPrice - a.maxPrice);
 
-      let bestProxyBidder: ProxyBid | null = null;
-      let bestBidAmount = 0;
+    if (eligibleProxies.length === 0) {
+      return { auction, autoBids, settled: settledResult };
+    }
 
-      for (const proxy of auction.proxyBids) {
-        if (proxy.bidderId === currentHighBidderId) continue;
-
-        const nextBid = currentHigh + auction.minIncrement;
-        if (proxy.maxPrice >= nextBid && nextBid > bestBidAmount) {
-          bestProxyBidder = proxy;
-          bestBidAmount = nextBid;
-        }
+    if (eligibleProxies.length === 1) {
+      const proxy = eligibleProxies[0];
+      const bidAmount = Math.min(proxy.maxPrice, currentHigh + inc);
+      const result = await this.placeBidInternal(gameId, game, auctionId, proxy.bidderId, bidAmount, true);
+      if (!('error' in result)) {
+        autoBids.push(result.bid);
+        if (result.settled) settledResult = result.settled;
       }
+    } else {
+      const topProxy = eligibleProxies[0];
+      const secondMaxPrice = eligibleProxies[1].maxPrice;
 
-      if (bestProxyBidder && bestBidAmount > 0) {
-        const placeResult = await this.placeBidInternal(
-          gameId,
-          game,
-          auctionId,
-          bestProxyBidder.bidderId,
-          bestBidAmount,
-          true
-        );
-
-        if ('error' in placeResult) {
-          break;
+      if (topProxy.maxPrice > secondMaxPrice) {
+        const secondProxy = eligibleProxies[1];
+        const secondBidAmount = Math.min(secondProxy.maxPrice, currentHigh + inc);
+        const secondResult = await this.placeBidInternal(gameId, game, auctionId, secondProxy.bidderId, secondBidAmount, true);
+        if (!('error' in secondResult)) {
+          autoBids.push(secondResult.bid);
+          if (secondResult.settled) {
+            settledResult = secondResult.settled;
+          }
         }
 
-        autoBids.push(placeResult.bid);
-
-        if (placeResult.settled) {
-          settledResult = placeResult.settled;
-          break;
+        if (!settledResult) {
+          const winningBidAmount = Math.min(topProxy.maxPrice, secondMaxPrice + inc);
+          const winResult = await this.placeBidInternal(gameId, game, auctionId, topProxy.bidderId, winningBidAmount, true);
+          if (!('error' in winResult)) {
+            autoBids.push(winResult.bid);
+            if (winResult.settled) settledResult = winResult.settled;
+          }
         }
-
-        continueProcessing = true;
+      } else {
+        const firstEligible = eligibleProxies[0];
+        const bidAmount = Math.min(firstEligible.maxPrice, currentHigh + inc);
+        const result = await this.placeBidInternal(gameId, game, auctionId, firstEligible.bidderId, bidAmount, true);
+        if (!('error' in result)) {
+          autoBids.push(result.bid);
+          if (result.settled) settledResult = result.settled;
+        }
       }
     }
 
-    const auctions = await this.getAuctions(gameId);
-    const auctionIndex = auctions.findIndex(a => a.id === auctionId);
-    const finalAuction = auctionIndex !== -1 ? auctions[auctionIndex] : (await this.getAuctions(gameId)).find(a => a.id === auctionId)!;
+    if (!settledResult) {
+      let remaining = true;
+      let guard = 0;
+      while (remaining && guard < 10) {
+        guard++;
+        remaining = false;
+
+        auctions = await this.getAuctions(gameId);
+        auctionIdx = auctions.findIndex(a => a.id === auctionId);
+        if (auctionIdx === -1) break;
+        auction = auctions[auctionIdx];
+        if (auction.status !== AuctionStatus.ACTIVE) break;
+
+        const cur = this.getCurrentHighestBid(auction);
+        const curHigh = cur ? cur.amount : auction.startPrice - auction.minIncrement;
+        const curBidderId = cur?.bidderId || '';
+
+        const stillEligible = auction.proxyBids
+          .filter(p => p.bidderId !== curBidderId)
+          .filter(p => p.maxPrice >= curHigh + inc)
+          .sort((a, b) => b.maxPrice - a.maxPrice);
+
+        if (stillEligible.length === 0) break;
+
+        if (stillEligible.length === 1) {
+          const proxy = stillEligible[0];
+          const bidAmount = Math.min(proxy.maxPrice, curHigh + inc);
+          const result = await this.placeBidInternal(gameId, game, auctionId, proxy.bidderId, bidAmount, true);
+          if ('error' in result) break;
+          autoBids.push(result.bid);
+          if (result.settled) { settledResult = result.settled; break; }
+          remaining = true;
+        } else {
+          const top = stillEligible[0];
+          const secondMax = stillEligible[1].maxPrice;
+
+          if (top.maxPrice > secondMax) {
+            const second = stillEligible[1];
+            const secondBid = Math.min(second.maxPrice, curHigh + inc);
+            const secResult = await this.placeBidInternal(gameId, game, auctionId, second.bidderId, secondBid, true);
+            if (!('error' in secResult)) {
+              autoBids.push(secResult.bid);
+              if (secResult.settled) { settledResult = secResult.settled; break; }
+            }
+
+            const winBid = Math.min(top.maxPrice, secondMax + inc);
+            const winResult = await this.placeBidInternal(gameId, game, auctionId, top.bidderId, winBid, true);
+            if (!('error' in winResult)) {
+              autoBids.push(winResult.bid);
+              if (winResult.settled) { settledResult = winResult.settled; break; }
+            }
+            remaining = true;
+          } else {
+            const firstElig = stillEligible[0];
+            const bidAmount = Math.min(firstElig.maxPrice, curHigh + inc);
+            const result = await this.placeBidInternal(gameId, game, auctionId, firstElig.bidderId, bidAmount, true);
+            if ('error' in result) break;
+            autoBids.push(result.bid);
+            if (result.settled) { settledResult = result.settled; break; }
+            remaining = true;
+          }
+        }
+      }
+    }
+
+    auctions = await this.getAuctions(gameId);
+    auctionIdx = auctions.findIndex(a => a.id === auctionId);
+    const finalAuction = auctionIdx !== -1 ? auctions[auctionIdx] : auction;
 
     return {
       auction: finalAuction,
@@ -533,19 +606,16 @@ export class AuctionService {
     }
 
     const existingProxyBid = auction.proxyBids.find(p => p.bidderId === bidderId);
+    const myHighestBid = this.getPlayerHighestActiveBid(auction, bidderId);
     const playerCommitted = await this.getPlayerTotalCommittedBids(gameId, bidderId);
-    let newCommitted = playerCommitted;
 
-    if (existingProxyBid) {
-      newCommitted = playerCommitted - existingProxyBid.maxPrice + maxPrice;
-    } else {
-      const myHighestBid = this.getPlayerHighestActiveBid(auction, bidderId);
-      if (myHighestBid) {
-        newCommitted = playerCommitted - myHighestBid.amount + maxPrice;
-      } else {
-        newCommitted = playerCommitted + maxPrice;
-      }
-    }
+    const oldCommitment = this.calculatePlayerAuctionCommitment(existingProxyBid, myHighestBid);
+    const newCommitment = this.calculatePlayerAuctionCommitment(
+      { bidderId, bidderName: bidder.name, maxPrice, createdAt: Date.now() } as ProxyBid,
+      myHighestBid
+    );
+
+    const newCommitted = playerCommitted - oldCommitment + newCommitment;
 
     if (bidder.money < newCommitted) {
       return { error: `余额不足，当前可用余额：${bidder.money} 金币，代理出价最高金额需：${newCommitted} 金币` };
