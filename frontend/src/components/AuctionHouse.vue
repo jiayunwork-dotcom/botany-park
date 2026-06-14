@@ -41,6 +41,14 @@
               <span class="price-high">💰 {{ row.currentHighBid }}</span>
             </template>
           </el-table-column>
+          <el-table-column label="一口价" width="110" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.buyNowPrice" type="warning" size="small" effect="dark">
+                ⚡ {{ row.buyNowPrice }}
+              </el-tag>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="剩余回合" width="100" align="center">
             <template #default="{ row }">
               <el-tag :type="row.turnsLeft <= 1 ? 'danger' : 'success'" size="small">
@@ -56,14 +64,71 @@
           <el-table-column label="卖家" width="120">
             <template #default="{ row }">{{ row.sellerName }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="180" align="center" fixed="right">
+          <el-table-column label="操作" width="220" align="center" fixed="right">
             <template #default="{ row }">
               <el-button size="small" type="primary" @click="openBidDialog(row)" :disabled="!canBid(row)">
                 出价
               </el-button>
+              <el-button v-if="row.buyNowPrice && canBid(row)" size="small" type="warning" @click="handleBuyNow(row)">
+                一口价
+              </el-button>
               <el-button size="small" @click="openDetailDialog(row)">
                 详情
               </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="📜 历史记录" name="history">
+        <div class="history-filter">
+          <el-select v-model="historySpeciesFilter" placeholder="按物种筛选" clearable size="small" style="width: 200px;">
+            <el-option
+              v-for="species in allSpeciesList"
+              :key="species.id"
+              :label="`${species.icon} ${species.name}`"
+              :value="species.id"
+            />
+          </el-select>
+          <span class="history-hint">显示最近 20 场已结束拍卖</span>
+        </div>
+        <div v-if="filteredHistory.length === 0" class="empty-state">
+          暂无历史拍卖记录
+        </div>
+        <el-table v-else :data="filteredHistory" size="small" stripe>
+          <el-table-column label="物种" width="160">
+            <template #default="{ row }">
+              <div class="species-cell">
+                <span class="species-icon">{{ getSpecies(row.speciesId)?.icon }}</span>
+                <span class="species-name">{{ getSpecies(row.speciesId)?.name }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="数量" width="80" align="center">
+            <template #default="{ row }">{{ row.quantity }}</template>
+          </el-table-column>
+          <el-table-column label="最终成交价" width="140" align="center">
+            <template #default="{ row }">
+              <span v-if="row.status === 'settled'" class="price-high">💰 {{ row.finalPrice }}</span>
+              <span v-else class="failed-text">流拍</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="卖家" width="120">
+            <template #default="{ row }">{{ row.sellerName }}</template>
+          </el-table-column>
+          <el-table-column label="买家/得主" width="120">
+            <template #default="{ row }">
+              {{ row.winnerName || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="结束回合" width="100" align="center">
+            <template #default="{ row }">第 {{ row.settledAtTurn }} 回合</template>
+          </el-table-column>
+          <el-table-column label="状态" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag :type="getStatusType(row.status)" size="small">
+                {{ getStatusText(row.status) }}
+              </el-tag>
             </template>
           </el-table-column>
         </el-table>
@@ -252,6 +317,24 @@
             <el-radio :label="3">3 回合</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="设置一口价">
+          <el-switch v-model="createForm.enableBuyNow" />
+          <span class="form-hint" v-if="createForm.enableBuyNow">
+            买家出价达到一口价时立即成交
+          </span>
+        </el-form-item>
+        <el-form-item v-if="createForm.enableBuyNow" label="一口价金额">
+          <el-input-number
+            v-model="createForm.buyNowPrice"
+            :min="minBuyNowPrice"
+            :step="10"
+            size="large"
+            style="width: 100%"
+          />
+          <span class="form-hint">
+            一口价必须高于起拍价（最少 {{ minBuyNowPrice }} 金币）
+          </span>
+        </el-form-item>
         <el-form-item label="预估总价">
           <span class="estimate-price">💰 {{ createForm.startPrice * createForm.quantity }} 金币</span>
         </el-form-item>
@@ -305,7 +388,13 @@
         </div>
       </div>
       <el-form :model="bidForm" label-width="120px" style="margin-top: 16px;">
-        <el-form-item label="我的出价">
+        <el-form-item label="出价模式">
+          <el-radio-group v-model="bidForm.mode">
+            <el-radio label="manual">手动出价</el-radio>
+            <el-radio label="proxy">代理出价</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="bidForm.mode === 'manual'" label="我的出价">
           <el-input-number
             v-model="bidForm.amount"
             :min="minBidAmount"
@@ -315,11 +404,40 @@
           />
           <span class="form-hint">至少出价 {{ minBidAmount }} 金币（{{ bidHint }}）</span>
         </el-form-item>
+        <el-form-item v-if="bidForm.mode === 'proxy'" label="最高心理价">
+          <el-input-number
+            v-model="bidForm.proxyMaxPrice"
+            :min="minProxyPrice"
+            :step="bidTargetAuction?.minIncrement || 10"
+            size="large"
+            style="width: 100%"
+          />
+          <span class="form-hint">系统会自动加价直到达到此价格上限</span>
+        </el-form-item>
+        <div v-if="bidForm.mode === 'proxy'" class="proxy-bid-info">
+          <el-alert
+            title="代理出价说明"
+            type="info"
+            :closable="false"
+            size="small"
+            show-icon
+          >
+            <template #default>
+              <p>• 设置一个您愿意支付的最高价格</p>
+              <p>• 当有人超过当前最高价时，系统自动帮您加价</p>
+              <p>• 每次加价幅度为最低加价金额</p>
+              <p>• 余额校验按最高心理价位计算</p>
+            </template>
+          </el-alert>
+        </div>
+        <div v-if="myProxyBidInfo" class="current-proxy-info">
+          <el-tag type="warning">当前代理出价上限：💰 {{ myProxyBidInfo.maxPrice }}</el-tag>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="showBidDialog = false">取消</el-button>
         <el-button type="primary" @click="handlePlaceBid" :disabled="!canSubmitBid">
-          确认出价
+          {{ bidForm.mode === 'proxy' ? '设置代理出价' : '确认出价' }}
         </el-button>
       </template>
     </el-dialog>
@@ -359,8 +477,16 @@
             <span class="stat-value">{{ detailAuction.turnsLeft }} / {{ detailAuction.totalTurns }}</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">出价次数</span>
-            <span class="stat-value">{{ detailAuction.bids.length }}</span>
+            <span class="stat-label">有效出价数</span>
+            <span class="stat-value">{{ activeBidCount }}</span>
+          </div>
+          <div v-if="detailAuction.buyNowPrice" class="stat-item highlight">
+            <span class="stat-label">⚡ 一口价</span>
+            <span class="stat-value buy-now-price">💰 {{ detailAuction.buyNowPrice }}</span>
+          </div>
+          <div v-if="myProxyBidInDetail" class="stat-item">
+            <span class="stat-label">我的代理价</span>
+            <span class="stat-value proxy-price">💰 {{ myProxyBidInDetail.maxPrice }}</span>
           </div>
         </div>
 
@@ -369,6 +495,13 @@
         </div>
         <div v-else-if="detailAuction.status === 'failed'" class="detail-result failed">
           ⚠️ 本场拍卖流拍，种子已退回卖家
+        </div>
+
+        <div v-if="detailAuction.status === 'active' && canWithdrawInDetail" class="detail-actions">
+          <el-button type="danger" size="small" @click="handleWithdrawBid">
+            ↩️ 撤回我的最近一次出价
+          </el-button>
+          <span class="withdraw-hint">（剩余撤回次数：{{ 1 - myWithdrawCountInDetail }} / 1）</span>
         </div>
 
         <div class="detail-bids-section">
@@ -382,25 +515,36 @@
               :key="bid.id"
               :timestamp="formatBidTime(bid.createdAt)"
               placement="top"
-              :type="index === 0 ? 'primary' : ''"
-              :hollow="index !== 0"
+              :type="bid.status === 'withdrawn' ? 'info' : (index === 0 ? 'primary' : '')"
+              :hollow="bid.status !== 'withdrawn' && index !== 0"
+              :class="{ 'bid-withdrawn': bid.status === 'withdrawn' }"
             >
-              <div class="bid-item">
+              <div class="bid-item" :class="{ 'bid-withdrawn': bid.status === 'withdrawn' }">
                 <span class="bidder-name">{{ bid.bidderName }}</span>
                 <span class="bid-amount">出价 💰 {{ bid.amount }}</span>
                 <el-tag
-                  v-if="index === 0 && detailAuction.status === 'active'"
+                  v-if="bid.status === 'withdrawn'"
+                  type="info"
+                  size="small"
+                >
+                  已撤回
+                </el-tag>
+                <el-tag
+                  v-else-if="isHighestActiveBid(bid) && detailAuction.status === 'active'"
                   type="success"
                   size="small"
                 >
                   当前最高
                 </el-tag>
                 <el-tag
-                  v-if="detailAuction.status === 'settled' && index === 0 && bid.bidderId === detailAuction.winnerId"
+                  v-else-if="detailAuction.status === 'settled' && bid.bidderId === detailAuction.winnerId && isHighestActiveBid(bid)"
                   type="warning"
                   size="small"
                 >
                   中标
+                </el-tag>
+                <el-tag v-if="bid.isAuto" type="primary" size="small" effect="plain">
+                  自动加价
                 </el-tag>
                 <span v-if="bid.bidderId === gameStore.currentPlayerId" class="my-bid-tag">（我）</span>
               </div>
@@ -413,7 +557,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue';
+import { ref, computed, reactive, watch, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useGameStore } from '../stores/game';
 import { socket } from '../services/socket';
@@ -433,12 +577,18 @@ const createForm = reactive({
   quantity: 1,
   startPrice: 0,
   minIncrement: 0,
-  totalTurns: 2
+  totalTurns: 2,
+  enableBuyNow: false,
+  buyNowPrice: 0
 });
 
 const bidForm = reactive({
-  amount: 0
+  amount: 0,
+  mode: 'manual' as 'manual' | 'proxy',
+  proxyMaxPrice: 0
 });
+
+const historySpeciesFilter = ref('');
 
 const tradeTaxRate = computed(() => gameStore.tradeTaxRate);
 const publicFunds = computed(() => gameStore.publicFunds);
@@ -481,8 +631,16 @@ const calculatedMinIncrement = computed(() => {
   return Math.max(1, Math.floor(createForm.startPrice * 0.1));
 });
 
+const minBuyNowPrice = computed(() => {
+  return createForm.startPrice + 1;
+});
+
+const allSpeciesList = computed(() => {
+  return Object.values(gameStore.allSpecies);
+});
+
 const canSubmitCreate = computed(() => {
-  return (
+  let valid = (
     createForm.speciesId &&
     createForm.quantity >= 1 &&
     createForm.quantity <= maxQuantity.value &&
@@ -491,6 +649,10 @@ const canSubmitCreate = computed(() => {
     createForm.totalTurns >= 1 &&
     createForm.totalTurns <= 3
   );
+  if (createForm.enableBuyNow) {
+    valid = valid && createForm.buyNowPrice > createForm.startPrice;
+  }
+  return valid;
 });
 
 const activeAuctionsWithStats = computed(() => {
@@ -516,16 +678,22 @@ const myMoney = computed(() => gameStore.currentPlayer?.money || 0);
 const myCommittedBids = computed(() => {
   let total = 0;
   for (const auction of gameStore.activeAuctions) {
+    const proxyBid = auction.proxyBids?.find(p => p.bidderId === gameStore.currentPlayerId);
+    if (proxyBid) {
+      total += proxyBid.maxPrice;
+      continue;
+    }
     if (auction.currentHighBidderId === gameStore.currentPlayerId) {
       total += auction.currentHighBid;
     }
   }
-  if (
-    bidTargetAuction.value &&
-    bidTargetAuction.value.currentHighBidderId === gameStore.currentPlayerId &&
-    bidTargetAuction.value.status === 'active'
-  ) {
-    total -= bidTargetAuction.value.currentHighBid;
+  if (bidTargetAuction.value && bidTargetAuction.value.status === 'active') {
+    const targetProxyBid = bidTargetAuction.value.proxyBids?.find(p => p.bidderId === gameStore.currentPlayerId);
+    if (targetProxyBid) {
+      total -= targetProxyBid.maxPrice;
+    } else if (bidTargetAuction.value.currentHighBidderId === gameStore.currentPlayerId) {
+      total -= bidTargetAuction.value.currentHighBid;
+    }
   }
   return total;
 });
@@ -536,8 +704,8 @@ const availableForThisAuction = computed(() => {
 
 const minBidAmount = computed(() => {
   if (!bidTargetAuction.value) return 0;
-  const hasBids = bidTargetAuction.value.bids && bidTargetAuction.value.bids.length > 0;
-  if (!hasBids) {
+  const activeBids = gameStore.getActiveBids(bidTargetAuction.value);
+  if (activeBids.length === 0) {
     return bidTargetAuction.value.startPrice;
   }
   return bidTargetAuction.value.currentHighBid + bidTargetAuction.value.minIncrement;
@@ -545,13 +713,26 @@ const minBidAmount = computed(() => {
 
 const bidHint = computed(() => {
   if (!bidTargetAuction.value) return '';
-  const hasBids = bidTargetAuction.value.bids && bidTargetAuction.value.bids.length > 0;
-  if (!hasBids) return '起拍价';
+  const activeBids = gameStore.getActiveBids(bidTargetAuction.value);
+  if (activeBids.length === 0) return '起拍价';
   return '当前最高价 + 最低加价';
+});
+
+const minProxyPrice = computed(() => {
+  if (!bidTargetAuction.value) return 0;
+  return minBidAmount.value;
+});
+
+const myProxyBidInfo = computed(() => {
+  if (!bidTargetAuction.value) return null;
+  return gameStore.getMyProxyBid(bidTargetAuction.value.id);
 });
 
 const canSubmitBid = computed(() => {
   if (!bidTargetAuction.value) return false;
+  if (bidForm.mode === 'proxy') {
+    return bidForm.proxyMaxPrice >= minProxyPrice.value && bidForm.proxyMaxPrice <= availableForThisAuction.value;
+  }
   return (
     bidForm.amount >= minBidAmount.value &&
     bidForm.amount <= availableForThisAuction.value
@@ -560,7 +741,35 @@ const canSubmitBid = computed(() => {
 
 const sortedBids = computed(() => {
   if (!detailAuction.value) return [];
-  return [...detailAuction.value.bids].sort((a, b) => b.amount - a.amount);
+  return [...detailAuction.value.bids].sort((a, b) => b.createdAt - a.createdAt);
+});
+
+const filteredHistory = computed(() => {
+  let history = gameStore.auctionHistory || [];
+  if (historySpeciesFilter.value) {
+    history = history.filter(h => h.speciesId === historySpeciesFilter.value);
+  }
+  return history;
+});
+
+const activeBidCount = computed(() => {
+  if (!detailAuction.value) return 0;
+  return gameStore.getActiveBids(detailAuction.value).length;
+});
+
+const canWithdrawInDetail = computed(() => {
+  if (!detailAuction.value) return false;
+  return gameStore.canWithdrawBid(detailAuction.value.id);
+});
+
+const myWithdrawCountInDetail = computed(() => {
+  if (!detailAuction.value) return 0;
+  return gameStore.getMyWithdrawCount(detailAuction.value.id);
+});
+
+const myProxyBidInDetail = computed(() => {
+  if (!detailAuction.value) return undefined;
+  return gameStore.getMyProxyBid(detailAuction.value.id);
 });
 
 function onSpeciesChange() {
@@ -569,6 +778,7 @@ function onSpeciesChange() {
   if (species) {
     createForm.startPrice = Math.floor(species.price * 0.5);
     createForm.minIncrement = Math.floor(createForm.startPrice * 0.1);
+    createForm.buyNowPrice = createForm.startPrice * 2;
   }
 }
 
@@ -578,11 +788,24 @@ function resetCreateForm() {
   createForm.startPrice = 0;
   createForm.minIncrement = 0;
   createForm.totalTurns = 2;
+  createForm.enableBuyNow = false;
+  createForm.buyNowPrice = 0;
 }
 
 function resetBidForm() {
   bidForm.amount = 0;
+  bidForm.mode = 'manual';
+  bidForm.proxyMaxPrice = 0;
   bidTargetAuction.value = null;
+}
+
+function isHighestActiveBid(bid: any): boolean {
+  if (!detailAuction.value) return false;
+  const activeBids = gameStore.getActiveBids(detailAuction.value);
+  if (activeBids.length === 0) return false;
+  if (bid.status !== 'active') return false;
+  const highest = activeBids.reduce((max, b) => b.amount > max.amount ? b : max, activeBids[0]);
+  return bid.id === highest.id;
 }
 
 function canBid(auction: Auction): boolean {
@@ -624,7 +847,8 @@ function handleCreateAuction() {
     quantity: createForm.quantity,
     startPrice: createForm.startPrice,
     minIncrement: createForm.minIncrement,
-    totalTurns: createForm.totalTurns
+    totalTurns: createForm.totalTurns,
+    buyNowPrice: createForm.enableBuyNow ? createForm.buyNowPrice : null
   });
   showCreateDialog.value = false;
   resetCreateForm();
@@ -654,23 +878,98 @@ function openBidDialog(auction: Auction) {
   }
   bidTargetAuction.value = auction;
   bidForm.amount = auction.currentHighBid + auction.minIncrement;
+  const proxyBid = gameStore.getMyProxyBid(auction.id);
+  if (proxyBid) {
+    bidForm.mode = 'proxy';
+    bidForm.proxyMaxPrice = proxyBid.maxPrice;
+  } else {
+    bidForm.mode = 'manual';
+    bidForm.proxyMaxPrice = auction.currentHighBid + auction.minIncrement * 5;
+  }
   showBidDialog.value = true;
 }
 
 function handlePlaceBid() {
   if (!bidTargetAuction.value) return;
-  socket.value?.emit('place_bid', {
-    auctionId: bidTargetAuction.value.id,
-    bidAmount: bidForm.amount
-  });
+
+  if (bidForm.mode === 'proxy') {
+    socket.value?.emit('set_proxy_bid', {
+      auctionId: bidTargetAuction.value.id,
+      maxPrice: bidForm.proxyMaxPrice
+    });
+  } else {
+    socket.value?.emit('place_bid', {
+      auctionId: bidTargetAuction.value.id,
+      bidAmount: bidForm.amount
+    });
+  }
+
   showBidDialog.value = false;
   resetBidForm();
+}
+
+async function handleWithdrawBid() {
+  if (!detailAuction.value) return;
+  try {
+    await ElMessageBox.confirm('确定要撤回你最近的一次出价吗？撤回后将回退到前一个有效出价。', '确认撤回', {
+      confirmButtonText: '确定撤回',
+      cancelButtonText: '保留出价',
+      type: 'warning'
+    });
+    socket.value?.emit('withdraw_bid', {
+      auctionId: detailAuction.value.id
+    });
+  } catch {
+    // 用户取消
+  }
+}
+
+async function handleBuyNow(auction: Auction) {
+  try {
+    await ElMessageBox.confirm(`确定以一口价 ${auction.buyNowPrice} 金币直接购买吗？`, '确认一口价购买', {
+      confirmButtonText: '确认购买',
+      cancelButtonText: '再想想',
+      type: 'warning'
+    });
+    socket.value?.emit('place_bid', {
+      auctionId: auction.id,
+      bidAmount: auction.buyNowPrice!
+    });
+  } catch {
+    // 用户取消
+  }
+}
+
+function loadAuctionHistory(speciesId?: string) {
+  if (speciesId) {
+    socket.value?.emit('get_auction_history', { speciesId });
+  } else {
+    socket.value?.emit('get_auction_history', {});
+  }
 }
 
 function openDetailDialog(auction: Auction) {
   detailAuction.value = auction;
   showDetailDialog.value = true;
 }
+
+watch(activeTab, (newTab) => {
+  if (newTab === 'history') {
+    loadAuctionHistory(historySpeciesFilter.value || undefined);
+  }
+});
+
+watch(historySpeciesFilter, (speciesId) => {
+  if (activeTab.value === 'history') {
+    loadAuctionHistory(speciesId || undefined);
+  }
+});
+
+onMounted(() => {
+  if (activeTab.value === 'history') {
+    loadAuctionHistory();
+  }
+});
 </script>
 
 <style scoped>
@@ -956,5 +1255,78 @@ function openDetailDialog(auction: Auction) {
   color: #409eff;
   font-size: 12px;
   font-weight: 600;
+}
+
+.history-filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
+
+.history-hint {
+  color: #909399;
+  font-size: 12px;
+}
+
+.text-muted {
+  color: #c0c4cc;
+}
+
+.bid-withdrawn .bid-item {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.bid-item.bid-withdrawn {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: #fef0f0;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.withdraw-hint {
+  color: #909399;
+  font-size: 12px;
+}
+
+.buy-now-price {
+  color: #e6a23c;
+  font-weight: bold;
+}
+
+.proxy-price {
+  color: #909399;
+  font-weight: 600;
+}
+
+.proxy-bid-info {
+  margin-top: 12px;
+}
+
+.proxy-bid-info :deep(.el-alert__description) p {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.current-proxy-info {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.stat-item.highlight {
+  background: #fdf6ec;
+  border: 1px solid #f5dab1;
 }
 </style>

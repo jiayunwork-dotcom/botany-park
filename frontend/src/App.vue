@@ -90,6 +90,10 @@ onMounted(async () => {
       gameStore.setAuctions(data.auctions);
     });
 
+    socket.value?.on('auction_history', (data: { history: Auction[] }) => {
+      gameStore.setAuctionHistory(data.history);
+    });
+
     socket.value?.on('auction_created', (data: { auction: Auction }) => {
       ElMessage.success(`拍卖已发起：${data.auction.quantity} 颗种子，起拍价 ${data.auction.startPrice}`);
     });
@@ -102,17 +106,31 @@ onMounted(async () => {
       ElMessage.success(`出价成功！当前最高价：${data.bid.amount}`);
     });
 
+    socket.value?.on('bid_withdrawn', (data: { auction: Auction; bid: AuctionBid }) => {
+      ElMessage.info(`已撤回出价：💰 ${data.bid.amount}`);
+    });
+
+    socket.value?.on('proxy_bid_set', (data: { auction: Auction; autoBids: AuctionBid[] }) => {
+      if (data.autoBids && data.autoBids.length > 0) {
+        ElMessage.success(`代理出价已设置，自动加价 ${data.autoBids.length} 次`);
+      } else {
+        ElMessage.success('代理出价已设置');
+      }
+    });
+
     socket.value?.on('auction_bid_notification', (data: {
       auctionId: string;
       currentHighBid: number;
       bidderName: string;
       speciesId: string;
       quantity: number;
+      isAuto?: boolean;
     }) => {
       const species = gameStore.allSpecies[data.speciesId];
       const speciesName = species ? `${species.icon} ${species.name}` : '种子';
+      const autoTag = data.isAuto ? '（自动）' : '';
       ElMessage.warning(
-        `🔔 ${data.bidderName} 对你参与的 ${speciesName} × ${data.quantity} 拍卖加价了！当前最高价：💰 ${data.currentHighBid}`
+        `🔔 ${data.bidderName}${autoTag} 对你参与的 ${speciesName} × ${data.quantity} 拍卖加价了！当前最高价：💰 ${data.currentHighBid}`
       );
     });
 

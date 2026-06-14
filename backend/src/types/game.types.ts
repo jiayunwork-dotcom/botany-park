@@ -283,6 +283,11 @@ export enum AuctionStatus {
   FAILED = 'failed'
 }
 
+export enum BidStatus {
+  ACTIVE = 'active',
+  WITHDRAWN = 'withdrawn'
+}
+
 export interface AuctionBid {
   id: string;
   auctionId: string;
@@ -291,6 +296,15 @@ export interface AuctionBid {
   amount: number;
   createdAt: number;
   createdAtTurn: number;
+  status: BidStatus;
+  isAuto: boolean;
+}
+
+export interface ProxyBid {
+  bidderId: string;
+  bidderName: string;
+  maxPrice: number;
+  createdAt: number;
 }
 
 export interface Auction {
@@ -313,6 +327,9 @@ export interface Auction {
   winnerName: string | null;
   finalPrice: number | null;
   settledAtTurn: number | null;
+  buyNowPrice: number | null;
+  proxyBids: ProxyBid[];
+  withdrawCount: { [bidderId: string]: number };
 }
 
 export interface AuctionSettlementResult {

@@ -15,7 +15,10 @@ import type {
   MarketSpeciesStats,
   Negotiation,
   Auction,
-  AuctionSettlementResult
+  AuctionSettlementResult,
+  AuctionBid,
+  ProxyBid,
+  BidStatus
 } from '../types/game';
 
 export interface SeedSuitability {
@@ -51,6 +54,7 @@ export const useGameStore = defineStore('game', () => {
   const tradeTaxRate = ref(0.05);
   const pendingNegotiations = ref<Negotiation[]>([]);
   const auctions = ref<Auction[]>([]);
+  const auctionHistory = ref<Auction[]>([]);
   const recentAuctionSettlements = ref<AuctionSettlementResult[]>([]);
 
   const currentPlayer = computed<PlayerState | null>(() => {
@@ -275,11 +279,15 @@ export const useGameStore = defineStore('game', () => {
     );
   });
 
+  function getActiveBids(auction: Auction): AuctionBid[] {
+    return auction.bids.filter(b => b.status === 'active');
+  }
+
   function getMyHighestBid(auctionId: string): number {
     if (!currentPlayerId.value) return 0;
     const auction = auctions.value.find(a => a.id === auctionId);
     if (!auction) return 0;
-    const myBids = auction.bids.filter(b => b.bidderId === currentPlayerId.value);
+    const myBids = getActiveBids(auction).filter(b => b.bidderId === currentPlayerId.value);
     if (myBids.length === 0) return 0;
     return Math.max(...myBids.map(b => b.amount));
   }
@@ -291,8 +299,44 @@ export const useGameStore = defineStore('game', () => {
     return auction.currentHighBidderId === currentPlayerId.value;
   }
 
+  function getMyProxyBid(auctionId: string): ProxyBid | undefined {
+    if (!currentPlayerId.value) return undefined;
+    const auction = auctions.value.find(a => a.id === auctionId);
+    if (!auction) return undefined;
+    return auction.proxyBids?.find(p => p.bidderId === currentPlayerId.value);
+  }
+
+  function getMyWithdrawCount(auctionId: string): number {
+    if (!currentPlayerId.value) return 0;
+    const auction = auctions.value.find(a => a.id === auctionId);
+    if (!auction) return 0;
+    return auction.withdrawCount?.[currentPlayerId.value] || 0;
+  }
+
+  function canWithdrawBid(auctionId: string): boolean {
+    if (!currentPlayerId.value) return false;
+    const auction = auctions.value.find(a => a.id === auctionId);
+    if (!auction || auction.status !== 'active') return false;
+
+    const withdrawCount = getMyWithdrawCount(auctionId);
+    if (withdrawCount >= 1) return false;
+
+    const myActiveBids = getActiveBids(auction).filter(b => b.bidderId === currentPlayerId.value);
+    if (myActiveBids.length === 0) return false;
+
+    const allActiveBids = getActiveBids(auction);
+    const otherActiveBids = allActiveBids.filter(b => b.bidderId !== currentPlayerId.value);
+    if (otherActiveBids.length === 0) return false;
+
+    return true;
+  }
+
   function setAuctions(newAuctions: Auction[]) {
     auctions.value = newAuctions;
+  }
+
+  function setAuctionHistory(history: Auction[]) {
+    auctionHistory.value = history;
   }
 
   function addAuctionSettlement(result: AuctionSettlementResult) {
@@ -340,6 +384,7 @@ export const useGameStore = defineStore('game', () => {
     tradeTaxRate.value = 0.05;
     pendingNegotiations.value = [];
     auctions.value = [];
+    auctionHistory.value = [];
     recentAuctionSettlements.value = [];
   }
 
@@ -359,6 +404,7 @@ export const useGameStore = defineStore('game', () => {
     tradeTaxRate,
     pendingNegotiations,
     auctions,
+    auctionHistory,
     recentAuctionSettlements,
     currentPlayer,
     isHost,
@@ -380,9 +426,14 @@ export const useGameStore = defineStore('game', () => {
     setPublicFunds,
     setTradeTaxRate,
     setAuctions,
+    setAuctionHistory,
     addAuctionSettlement,
     getMyHighestBid,
     isLeadingBid,
+    getMyProxyBid,
+    getMyWithdrawCount,
+    canWithdrawBid,
+    getActiveBids,
     addPendingRandomEvent,
     clearPendingRandomEvents,
     addTurnEvents,

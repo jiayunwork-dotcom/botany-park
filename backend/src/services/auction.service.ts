@@ -7,7 +7,9 @@ import {
   GameState,
   PlayerState,
   MarketOrder,
-  MarketOrderStatus
+  MarketOrderStatus,
+  BidStatus,
+  ProxyBid
 } from '../types/game.types';
 import { RedisService } from './redis.service';
 import { TradeService } from './trade.service';
@@ -22,6 +24,8 @@ export class AuctionService {
   private readonly MIN_TURNS = 1;
   private readonly MAX_TURNS = 3;
   private readonly DEFAULT_TAX_RATE = 0.05;
+  private readonly MAX_WITHDRAW_PER_AUCTION = 1;
+  private readonly HISTORY_LIMIT = 20;
 
   constructor(
     private readonly redis: RedisService,
@@ -66,7 +70,8 @@ export class AuctionService {
     quantity: number,
     startPrice: number,
     minIncrement: number,
-    totalTurns: number
+    totalTurns: number,
+    buyNowPrice: number | null = null
   ): Promise<{ auction: Auction; game: GameState } | { error: string }> {
     const seller = game.players[sellerId];
     if (!seller) return { error: '玩家不存在' };
@@ -92,6 +97,10 @@ export class AuctionService {
 
     if (totalTurns < this.MIN_TURNS || totalTurns > this.MAX_TURNS) {
       return { error: `持续回合数必须在 ${this.MIN_TURNS} 到 ${this.MAX_TURNS} 之间` };
+    }
+
+    if (buyNowPrice !== null && buyNowPrice <= startPrice) {
+      return { error: '一口价必须高于起拍价' };
     }
 
     const marketOrders = await this.tradeService.getMarketOrders(gameId);
@@ -135,7 +144,10 @@ export class AuctionService {
       winnerId: null,
       winnerName: null,
       finalPrice: null,
-      settledAtTurn: null
+      settledAtTurn: null,
+      buyNowPrice,
+      proxyBids: [],
+      withdrawCount: {}
     };
 
     auctions.push(auction);
@@ -171,6 +183,39 @@ export class AuctionService {
     return { auction, game };
   }
 
+  getActiveBids(auction: Auction): AuctionBid[] {
+    return auction.bids.filter(b => b.status === BidStatus.ACTIVE);
+  }
+
+  getPlayerActiveBids(auction: Auction, playerId: string): AuctionBid[] {
+    return this.getActiveBids(auction).filter(b => b.bidderId === playerId);
+  }
+
+  getPlayerHighestActiveBid(auction: Auction, playerId: string): AuctionBid | null {
+    const playerBids = this.getPlayerActiveBids(auction, playerId);
+    if (playerBids.length === 0) return null;
+    return playerBids.reduce((max, bid) => bid.amount > max.amount ? bid : max, playerBids[0]);
+  }
+
+  getCurrentHighestBid(auction: Auction): AuctionBid | null {
+    const activeBids = this.getActiveBids(auction);
+    if (activeBids.length === 0) return null;
+    return activeBids.reduce((max, bid) => bid.amount > max.amount ? bid : max, activeBids[0]);
+  }
+
+  updateAuctionHighBid(auction: Auction): void {
+    const highestBid = this.getCurrentHighestBid(auction);
+    if (highestBid) {
+      auction.currentHighBid = highestBid.amount;
+      auction.currentHighBidderId = highestBid.bidderId;
+      auction.currentHighBidderName = highestBid.bidderName;
+    } else {
+      auction.currentHighBid = auction.startPrice;
+      auction.currentHighBidderId = null;
+      auction.currentHighBidderName = null;
+    }
+  }
+
   async getPlayerTotalCommittedBids(
     gameId: string,
     playerId: string
@@ -180,6 +225,13 @@ export class AuctionService {
 
     for (const auction of auctions) {
       if (auction.status !== AuctionStatus.ACTIVE) continue;
+
+      const proxyBid = auction.proxyBids.find(p => p.bidderId === playerId);
+      if (proxyBid) {
+        total += proxyBid.maxPrice;
+        continue;
+      }
+
       if (auction.currentHighBidderId === playerId) {
         total += auction.currentHighBid;
       }
@@ -188,13 +240,133 @@ export class AuctionService {
     return total;
   }
 
-  async placeBid(
+  async withdrawBid(
+    gameId: string,
+    auctionId: string,
+    bidderId: string
+  ): Promise<{ auction: Auction; bid: AuctionBid } | { error: string }> {
+    const auctions = await this.getAuctions(gameId);
+    const auctionIndex = auctions.findIndex(a => a.id === auctionId);
+
+    if (auctionIndex === -1) return { error: '拍卖不存在' };
+
+    const auction = auctions[auctionIndex];
+    if (auction.status !== AuctionStatus.ACTIVE) return { error: '拍卖已结束或已取消' };
+
+    const withdrawCount = auction.withdrawCount[bidderId] || 0;
+    if (withdrawCount >= this.MAX_WITHDRAW_PER_AUCTION) {
+      return { error: `每场拍卖最多只能撤回 ${this.MAX_WITHDRAW_PER_AUCTION} 次出价` };
+    }
+
+    const activeBids = this.getActiveBids(auction);
+    const otherActiveBids = activeBids.filter(b => b.bidderId !== bidderId);
+    if (otherActiveBids.length === 0 && activeBids.length <= 1) {
+      return { error: '你是唯一出价者，无法撤回出价' };
+    }
+
+    const myActiveBids = this.getPlayerActiveBids(auction, bidderId);
+    if (myActiveBids.length === 0) {
+      return { error: '没有可撤回的出价' };
+    }
+
+    const myLatestBid = myActiveBids.reduce((latest, bid) =>
+      bid.createdAt > latest.createdAt ? bid : latest, myActiveBids[0]
+    );
+
+    myLatestBid.status = BidStatus.WITHDRAWN;
+    auction.withdrawCount[bidderId] = withdrawCount + 1;
+
+    this.updateAuctionHighBid(auction);
+
+    await this.saveAuctions(gameId, auctions);
+
+    return { auction, bid: myLatestBid };
+  }
+
+  async processProxyBids(
+    gameId: string,
+    game: GameState,
+    auctionId: string
+  ): Promise<{ auction: Auction; autoBids: AuctionBid[]; settled?: AuctionSettlementResult }> {
+    const autoBids: AuctionBid[] = [];
+    let settledResult: AuctionSettlementResult | undefined;
+
+    let continueProcessing = true;
+    let iterations = 0;
+    const maxIterations = 100;
+
+    while (continueProcessing && iterations < maxIterations) {
+      iterations++;
+      continueProcessing = false;
+
+      const auctions = await this.getAuctions(gameId);
+      const auctionIndex = auctions.findIndex(a => a.id === auctionId);
+      if (auctionIndex === -1) break;
+      const auction = auctions[auctionIndex];
+
+      if (auction.status !== AuctionStatus.ACTIVE) break;
+
+      const highestBid = this.getCurrentHighestBid(auction);
+      const currentHigh = highestBid ? highestBid.amount : auction.startPrice - auction.minIncrement;
+      const currentHighBidderId = highestBid?.bidderId || '';
+
+      let bestProxyBidder: ProxyBid | null = null;
+      let bestBidAmount = 0;
+
+      for (const proxy of auction.proxyBids) {
+        if (proxy.bidderId === currentHighBidderId) continue;
+
+        const nextBid = currentHigh + auction.minIncrement;
+        if (proxy.maxPrice >= nextBid && nextBid > bestBidAmount) {
+          bestProxyBidder = proxy;
+          bestBidAmount = nextBid;
+        }
+      }
+
+      if (bestProxyBidder && bestBidAmount > 0) {
+        const placeResult = await this.placeBidInternal(
+          gameId,
+          game,
+          auctionId,
+          bestProxyBidder.bidderId,
+          bestBidAmount,
+          true
+        );
+
+        if ('error' in placeResult) {
+          break;
+        }
+
+        autoBids.push(placeResult.bid);
+
+        if (placeResult.settled) {
+          settledResult = placeResult.settled;
+          break;
+        }
+
+        continueProcessing = true;
+      }
+    }
+
+    const auctions = await this.getAuctions(gameId);
+    const auctionIndex = auctions.findIndex(a => a.id === auctionId);
+    const finalAuction = auctionIndex !== -1 ? auctions[auctionIndex] : (await this.getAuctions(gameId)).find(a => a.id === auctionId)!;
+
+    return {
+      auction: finalAuction,
+      autoBids,
+      settled: settledResult
+    };
+  }
+
+  private async placeBidInternal(
     gameId: string,
     game: GameState,
     auctionId: string,
     bidderId: string,
-    bidAmount: number
-  ): Promise<{ auction: Auction; bid: AuctionBid } | { error: string }> {
+    bidAmount: number,
+    isAuto: boolean = false
+  ): Promise<{ auction: Auction; bid: AuctionBid; settled?: AuctionSettlementResult } | { error: string }> {
     const auctions = await this.getAuctions(gameId);
     const auctionIndex = auctions.findIndex(a => a.id === auctionId);
 
@@ -208,20 +380,31 @@ export class AuctionService {
     if (!bidder) return { error: '玩家不存在' };
     if (bidder.isBankrupt) return { error: '破产玩家无法参与竞价' };
 
-    const minRequiredBid = auction.bids.length === 0
+    const activeBids = this.getActiveBids(auction);
+    const minRequiredBid = activeBids.length === 0
       ? auction.startPrice
       : auction.currentHighBid + auction.minIncrement;
     if (bidAmount < minRequiredBid) {
-      const hint = auction.bids.length === 0
+      const hint = activeBids.length === 0
         ? '起拍价'
         : `当前最高价 + 最低加价`;
       return { error: `出价必须至少为 ${minRequiredBid} 金币（${hint}）` };
     }
 
+    if (auction.buyNowPrice !== null && bidAmount >= auction.buyNowPrice) {
+      bidAmount = auction.buyNowPrice;
+    }
+
     const playerCommitted = await this.getPlayerTotalCommittedBids(gameId, bidderId);
     let newCommitted = playerCommitted;
-    if (auction.currentHighBidderId === bidderId) {
-      newCommitted = playerCommitted - auction.currentHighBid + bidAmount;
+
+    const existingProxyBid = auction.proxyBids.find(p => p.bidderId === bidderId);
+    const myHighestBid = this.getPlayerHighestActiveBid(auction, bidderId);
+
+    if (existingProxyBid) {
+      newCommitted = playerCommitted - existingProxyBid.maxPrice + Math.max(bidAmount, existingProxyBid.maxPrice);
+    } else if (myHighestBid) {
+      newCommitted = playerCommitted - myHighestBid.amount + bidAmount;
     } else {
       newCommitted = playerCommitted + bidAmount;
     }
@@ -237,17 +420,139 @@ export class AuctionService {
       bidderName: bidder.name,
       amount: bidAmount,
       createdAt: Date.now(),
-      createdAtTurn: game.turn
+      createdAtTurn: game.turn,
+      status: BidStatus.ACTIVE,
+      isAuto
     };
 
     auction.bids.push(bid);
-    auction.currentHighBid = bidAmount;
-    auction.currentHighBidderId = bidderId;
-    auction.currentHighBidderName = bidder.name;
+    this.updateAuctionHighBid(auction);
 
     await this.saveAuctions(gameId, auctions);
 
-    return { auction, bid };
+    let settledResult: AuctionSettlementResult | undefined;
+
+    if (auction.buyNowPrice !== null && bidAmount >= auction.buyNowPrice) {
+      const settleResult = await this.settleAuction(gameId, game, auction);
+      game = settleResult.game;
+      settledResult = settleResult.result;
+    }
+
+    const result: { auction: Auction; bid: AuctionBid; settled?: AuctionSettlementResult } = {
+      auction,
+      bid
+    };
+    if (settledResult) {
+      result.settled = settledResult;
+    }
+
+    return result;
+  }
+
+  async placeBid(
+    gameId: string,
+    game: GameState,
+    auctionId: string,
+    bidderId: string,
+    bidAmount: number,
+    isAuto: boolean = false
+  ): Promise<{ auction: Auction; bid: AuctionBid; autoBids?: AuctionBid[]; settled?: AuctionSettlementResult } | { error: string }> {
+    const result = await this.placeBidInternal(gameId, game, auctionId, bidderId, bidAmount, isAuto);
+
+    if ('error' in result) {
+      return result;
+    }
+
+    if (result.settled) {
+      return {
+        auction: result.auction,
+        bid: result.bid,
+        settled: result.settled
+      };
+    }
+
+    if (!isAuto) {
+      const proxyResult = await this.processProxyBids(gameId, game, auctionId);
+      return {
+        auction: proxyResult.auction,
+        bid: result.bid,
+        autoBids: proxyResult.autoBids,
+        settled: proxyResult.settled
+      };
+    }
+
+    return {
+      auction: result.auction,
+      bid: result.bid
+    };
+  }
+
+  async setProxyBid(
+    gameId: string,
+    game: GameState,
+    auctionId: string,
+    bidderId: string,
+    maxPrice: number
+  ): Promise<{ auction: Auction; autoBids: AuctionBid[]; settled?: AuctionSettlementResult } | { error: string }> {
+    const auctions = await this.getAuctions(gameId);
+    const auctionIndex = auctions.findIndex(a => a.id === auctionId);
+
+    if (auctionIndex === -1) return { error: '拍卖不存在' };
+
+    const auction = auctions[auctionIndex];
+    if (auction.status !== AuctionStatus.ACTIVE) return { error: '拍卖已结束或已取消' };
+    if (auction.sellerId === bidderId) return { error: '不能对自己发起的拍卖设置代理出价' };
+
+    const bidder = game.players[bidderId];
+    if (!bidder) return { error: '玩家不存在' };
+    if (bidder.isBankrupt) return { error: '破产玩家无法参与竞价' };
+
+    if (maxPrice < auction.startPrice) {
+      return { error: `代理出价最高金额不能低于起拍价 ${auction.startPrice} 金币` };
+    }
+
+    if (auction.buyNowPrice !== null && maxPrice >= auction.buyNowPrice) {
+      maxPrice = auction.buyNowPrice;
+    }
+
+    const existingProxyBid = auction.proxyBids.find(p => p.bidderId === bidderId);
+    const playerCommitted = await this.getPlayerTotalCommittedBids(gameId, bidderId);
+    let newCommitted = playerCommitted;
+
+    if (existingProxyBid) {
+      newCommitted = playerCommitted - existingProxyBid.maxPrice + maxPrice;
+    } else {
+      const myHighestBid = this.getPlayerHighestActiveBid(auction, bidderId);
+      if (myHighestBid) {
+        newCommitted = playerCommitted - myHighestBid.amount + maxPrice;
+      } else {
+        newCommitted = playerCommitted + maxPrice;
+      }
+    }
+
+    if (bidder.money < newCommitted) {
+      return { error: `余额不足，当前可用余额：${bidder.money} 金币，代理出价最高金额需：${newCommitted} 金币` };
+    }
+
+    const proxyBid: ProxyBid = {
+      bidderId,
+      bidderName: bidder.name,
+      maxPrice,
+      createdAt: Date.now()
+    };
+
+    if (existingProxyBid) {
+      existingProxyBid.maxPrice = maxPrice;
+      existingProxyBid.createdAt = Date.now();
+    } else {
+      auction.proxyBids.push(proxyBid);
+    }
+
+    await this.saveAuctions(gameId, auctions);
+
+    const proxyResult = await this.processProxyBids(gameId, game, auctionId);
+
+    return proxyResult;
   }
 
   async getAuctionParticipantIds(auction: Auction): Promise<string[]> {
@@ -291,8 +596,9 @@ export class AuctionService {
     }
 
     const storedAuction = auctions[auctionIndex];
+    const activeBids = this.getActiveBids(storedAuction);
 
-    if (storedAuction.bids.length === 0) {
+    if (activeBids.length === 0) {
       const seller = game.players[storedAuction.sellerId];
       if (seller) {
         seller.ownedSeeds[storedAuction.speciesId] =
@@ -321,7 +627,7 @@ export class AuctionService {
     const taxRate = game.tradeTaxRate ?? this.DEFAULT_TAX_RATE;
 
     const playerHighestBid = new Map<string, AuctionBid>();
-    for (const bid of storedAuction.bids) {
+    for (const bid of activeBids) {
       const existing = playerHighestBid.get(bid.bidderId);
       if (!existing || bid.amount > existing.amount) {
         playerHighestBid.set(bid.bidderId, bid);
@@ -477,8 +783,46 @@ export class AuctionService {
     );
   }
 
+  getSettledAuctions(gameId: string, speciesId?: string): Promise<Auction[]> {
+    return this.getAuctions(gameId).then(auctions => {
+      let settled = auctions.filter(a =>
+        a.status === AuctionStatus.SETTLED || a.status === AuctionStatus.FAILED
+      );
+      if (speciesId) {
+        settled = settled.filter(a => a.speciesId === speciesId);
+      }
+      settled.sort((a, b) => (b.settledAtTurn || 0) - (a.settledAtTurn || 0));
+      return settled.slice(0, this.HISTORY_LIMIT);
+    });
+  }
+
   getParticipantCount(auction: Auction): number {
-    const bidderIds = new Set(auction.bids.map(b => b.bidderId));
+    const activeBids = this.getActiveBids(auction);
+    const bidderIds = new Set(activeBids.map(b => b.bidderId));
     return bidderIds.size;
+  }
+
+  getMyProxyBid(auction: Auction, playerId: string): ProxyBid | undefined {
+    return auction.proxyBids.find(p => p.bidderId === playerId);
+  }
+
+  getWithdrawCount(auction: Auction, playerId: string): number {
+    return auction.withdrawCount[playerId] || 0;
+  }
+
+  canWithdraw(auction: Auction, playerId: string): boolean {
+    if (auction.status !== AuctionStatus.ACTIVE) return false;
+
+    const withdrawCount = this.getWithdrawCount(auction, playerId);
+    if (withdrawCount >= this.MAX_WITHDRAW_PER_AUCTION) return false;
+
+    const myActiveBids = this.getPlayerActiveBids(auction, playerId);
+    if (myActiveBids.length === 0) return false;
+
+    const allActiveBids = this.getActiveBids(auction);
+    const otherActiveBids = allActiveBids.filter(b => b.bidderId !== playerId);
+    if (otherActiveBids.length === 0) return false;
+
+    return true;
   }
 }

@@ -551,7 +551,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('create_auction')
   async handleCreateAuction(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { speciesId: string; quantity: number; startPrice: number; minIncrement: number; totalTurns: number }
+    @MessageBody() data: { speciesId: string; quantity: number; startPrice: number; minIncrement: number; totalTurns: number; buyNowPrice?: number | null }
   ) {
     const clientInfo = this.clients[client.id];
     if (!clientInfo || !clientInfo.gameId) return;
@@ -570,7 +570,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       data.quantity,
       data.startPrice,
       data.minIncrement,
-      data.totalTurns
+      data.totalTurns,
+      data.buyNowPrice ?? null
     );
 
     if ('error' in result) {
@@ -613,6 +614,36 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.broadcastGameState(game.id, result.game);
   }
 
+  private async notifyAuctionBid(
+    gameId: string,
+    auction: Auction,
+    bid: AuctionBid,
+    excludePlayerId?: string
+  ) {
+    const participantIds = await this.auctionService.getAuctionParticipantIds(auction);
+    for (const pid of participantIds) {
+      if (excludePlayerId && pid === excludePlayerId) continue;
+      const participantSocket = this.findSocketByPlayerId(gameId, pid);
+      if (participantSocket) {
+        this.server.to(participantSocket).emit('auction_bid_notification', {
+          auctionId: auction.id,
+          currentHighBid: auction.currentHighBid,
+          bidderName: bid.bidderName,
+          speciesId: auction.speciesId,
+          quantity: auction.quantity,
+          isAuto: bid.isAuto
+        });
+      }
+    }
+  }
+
+  private async handleAuctionSettlement(
+    gameId: string,
+    settlement: AuctionSettlementResult
+  ) {
+    this.server.to(gameId).emit('auction_settled', settlement);
+  }
+
   @SubscribeMessage('place_bid')
   async handlePlaceBid(
     @ConnectedSocket() client: Socket,
@@ -642,22 +673,105 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     client.emit('bid_placed', { auction: result.auction, bid: result.bid });
 
-    const participantIds = await this.auctionService.getAuctionParticipantIds(result.auction);
-    for (const pid of participantIds) {
-      if (pid === clientInfo.playerId) continue;
-      const participantSocket = this.findSocketByPlayerId(clientInfo.gameId, pid);
-      if (participantSocket) {
-        this.server.to(participantSocket).emit('auction_bid_notification', {
-          auctionId: result.auction.id,
-          currentHighBid: result.auction.currentHighBid,
-          bidderName: result.bid.bidderName,
-          speciesId: result.auction.speciesId,
-          quantity: result.auction.quantity
-        });
+    await this.notifyAuctionBid(clientInfo.gameId, result.auction, result.bid, clientInfo.playerId);
+
+    if (result.autoBids && result.autoBids.length > 0) {
+      for (const autoBid of result.autoBids) {
+        await this.notifyAuctionBid(clientInfo.gameId, result.auction, autoBid, autoBid.bidderId);
       }
     }
 
+    if (result.settled) {
+      await this.gameState.saveGame(game);
+      await this.handleAuctionSettlement(clientInfo.gameId, result.settled);
+    }
+
     this.broadcastAuctionUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, game);
+  }
+
+  @SubscribeMessage('withdraw_bid')
+  async handleWithdrawBid(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { auctionId: string }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const result = await this.auctionService.withdrawBid(
+      clientInfo.gameId,
+      data.auctionId,
+      clientInfo.playerId
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    client.emit('bid_withdrawn', { auction: result.auction, bid: result.bid });
+
+    this.broadcastAuctionUpdate(clientInfo.gameId);
+  }
+
+  @SubscribeMessage('set_proxy_bid')
+  async handleSetProxyBid(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { auctionId: string; maxPrice: number }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.auctionService.setProxyBid(
+      clientInfo.gameId,
+      game,
+      data.auctionId,
+      clientInfo.playerId,
+      data.maxPrice
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    client.emit('proxy_bid_set', {
+      auction: result.auction,
+      autoBids: result.autoBids
+    });
+
+    for (const autoBid of result.autoBids) {
+      await this.notifyAuctionBid(clientInfo.gameId, result.auction, autoBid, autoBid.bidderId);
+    }
+
+    if (result.settled) {
+      await this.gameState.saveGame(game);
+      await this.handleAuctionSettlement(clientInfo.gameId, result.settled);
+    }
+
+    this.broadcastAuctionUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, game);
+  }
+
+  @SubscribeMessage('get_auction_history')
+  async handleGetAuctionHistory(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data?: { speciesId?: string }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const history = await this.auctionService.getSettledAuctions(
+      clientInfo.gameId,
+      data?.speciesId
+    );
+    client.emit('auction_history', { history });
   }
 
   private findSocketByPlayerId(gameId: string, playerId: string): string | null {
