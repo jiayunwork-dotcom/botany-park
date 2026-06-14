@@ -11,7 +11,9 @@ import type {
   RandomEvent,
   Plot,
   MicroClimate,
-  MarketOrder
+  MarketOrder,
+  MarketSpeciesStats,
+  Negotiation
 } from '../types/game';
 
 export interface SeedSuitability {
@@ -42,6 +44,10 @@ export const useGameStore = defineStore('game', () => {
   const weatherForecast = ref<WeatherForecast | null>(null);
   const pendingRandomEvents = ref<RandomEvent[]>([]);
   const marketOrders = ref<MarketOrder[]>([]);
+  const marketStats = ref<MarketSpeciesStats[]>([]);
+  const publicFunds = ref(0);
+  const tradeTaxRate = ref(0.05);
+  const pendingNegotiations = ref<Negotiation[]>([]);
 
   const currentPlayer = computed<PlayerState | null>(() => {
     if (!gameState.value || !currentPlayerId.value) return null;
@@ -253,6 +259,26 @@ export const useGameStore = defineStore('game', () => {
     marketOrders.value = orders;
   }
 
+  function setMarketStats(stats: MarketSpeciesStats[]) {
+    marketStats.value = stats;
+  }
+
+  function setPublicFunds(funds: number) {
+    publicFunds.value = funds;
+  }
+
+  function setTradeTaxRate(rate: number) {
+    tradeTaxRate.value = rate;
+  }
+
+  function addPendingNegotiation(negotiation: Negotiation) {
+    pendingNegotiations.value.push(negotiation);
+  }
+
+  function removePendingNegotiation(negotiationId: string) {
+    pendingNegotiations.value = pendingNegotiations.value.filter(n => n.id !== negotiationId);
+  }
+
   function reset() {
     gameState.value = null;
     currentPlayerId.value = '';
@@ -262,6 +288,10 @@ export const useGameStore = defineStore('game', () => {
     weatherForecast.value = null;
     pendingRandomEvents.value = [];
     marketOrders.value = [];
+    marketStats.value = [];
+    publicFunds.value = 0;
+    tradeTaxRate.value = 0.05;
+    pendingNegotiations.value = [];
   }
 
   return {
@@ -275,6 +305,10 @@ export const useGameStore = defineStore('game', () => {
     weatherForecast,
     pendingRandomEvents,
     marketOrders,
+    marketStats,
+    publicFunds,
+    tradeTaxRate,
+    pendingNegotiations,
     currentPlayer,
     isHost,
     isMyTurnReady,
@@ -288,6 +322,9 @@ export const useGameStore = defineStore('game', () => {
     setLeaderboard,
     setWeatherForecast,
     setMarketOrders,
+    setMarketStats,
+    setPublicFunds,
+    setTradeTaxRate,
     addPendingRandomEvent,
     clearPendingRandomEvents,
     addTurnEvents,
@@ -295,6 +332,8 @@ export const useGameStore = defineStore('game', () => {
     addPendingAction,
     clearPendingActions,
     removePendingAction,
+    addPendingNegotiation,
+    removePendingNegotiation,
     reset,
     calculateSuitability,
     getSeedSuitabilityList,

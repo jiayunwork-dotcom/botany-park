@@ -157,6 +157,8 @@ export interface GameState {
   currentEvents: any[];
   allSpecies: { [speciesId: string]: PlantSpecies };
   cityTouristBase: number;
+  publicFunds: number;
+  tradeTaxRate: number;
 }
 
 export interface LeaderboardEntry {
@@ -181,7 +183,52 @@ export enum MarketOrderStatus {
   ACTIVE = 'active',
   SOLD = 'sold',
   EXPIRED = 'expired',
-  CANCELLED = 'cancelled'
+  CANCELLED = 'cancelled',
+  NEGOTIATING = 'negotiating'
+}
+
+export interface TradeHistoryRecord {
+  id: string;
+  speciesId: string;
+  sellerId: string;
+  buyerId: string;
+  unitPrice: number;
+  quantity: number;
+  totalPrice: number;
+  taxAmount: number;
+  turn: number;
+  timestamp: number;
+}
+
+export interface MarketPricePoint {
+  turn: number;
+  avgPrice: number;
+  volume: number;
+}
+
+export interface MarketSpeciesStats {
+  speciesId: string;
+  avgPrice5Turns: number;
+  volume5Turns: number;
+  priceHistory: MarketPricePoint[];
+}
+
+export enum NegotiationStatus {
+  PENDING = 'pending',
+  ACCEPTED = 'accepted',
+  REJECTED = 'rejected',
+  EXPIRED = 'expired'
+}
+
+export interface Negotiation {
+  id: string;
+  orderId: string;
+  buyerId: string;
+  buyerName: string;
+  offerPrice: number;
+  status: NegotiationStatus;
+  createdAt: number;
+  expiresAt: number;
 }
 
 export interface MarketOrder {
@@ -194,4 +241,5 @@ export interface MarketOrder {
   createdAtTurn: number;
   turnsLeft: number;
   status: MarketOrderStatus;
+  currentNegotiation?: Negotiation | null;
 }

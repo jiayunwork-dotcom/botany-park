@@ -11,7 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { GameStateService } from '../services/game-state.service';
 import { GameEngineService } from '../services/game-engine.service';
 import { TradeService } from '../services/trade.service';
-import { PlayerAction, GamePhase, MarketOrder } from '../types/game.types';
+import { PlayerAction, GamePhase, MarketOrder, MarketSpeciesStats, Negotiation } from '../types/game.types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface ClientMap {
@@ -250,8 +250,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const clientInfo = this.clients[client.id];
     if (!clientInfo || !clientInfo.gameId) return;
 
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game) return;
+
     const orders = await this.tradeService.getMarketOrders(clientInfo.gameId);
-    client.emit('market_update', { orders });
+    const stats = await this.tradeService.getMarketStats(clientInfo.gameId, game);
+
+    client.emit('market_update', {
+      orders,
+      stats,
+      publicFunds: game.publicFunds || 0,
+      taxRate: game.tradeTaxRate || 0.05
+    });
   }
 
   @SubscribeMessage('create_order')
@@ -344,14 +354,201 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     await this.gameState.saveGame(result.game);
-    client.emit('order_bought', { order: result.order });
+    client.emit('order_bought', { order: result.order, taxAmount: result.taxAmount });
+
+    const sellerSocket = this.findSocketByPlayerId(clientInfo.gameId, result.order.sellerId);
+    if (sellerSocket) {
+      this.server.to(sellerSocket).emit('order_sold', {
+        order: result.order,
+        taxAmount: result.taxAmount,
+        sellerReceive: result.order.unitPrice * result.order.quantity - result.taxAmount
+      });
+    }
+
     this.broadcastMarketUpdate(clientInfo.gameId);
     this.broadcastGameState(game.id, result.game);
   }
 
+  @SubscribeMessage('buy_orders')
+  async handleBuyOrders(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { orderIds: string[] }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.tradeService.buyOrders(
+      clientInfo.gameId,
+      game,
+      data.orderIds,
+      clientInfo.playerId
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    await this.gameState.saveGame(result.game);
+    client.emit('orders_bought', {
+      orders: result.orders,
+      totalCost: result.totalCost,
+      totalTax: result.totalTax
+    });
+
+    for (const order of result.orders) {
+      const sellerSocket = this.findSocketByPlayerId(clientInfo.gameId, order.sellerId);
+      if (sellerSocket) {
+        const orderTotal = order.unitPrice * order.quantity;
+        const taxAmount = Math.floor(orderTotal * (game.tradeTaxRate || 0.05));
+        this.server.to(sellerSocket).emit('order_sold', {
+          order,
+          taxAmount,
+          sellerReceive: orderTotal - taxAmount
+        });
+      }
+    }
+
+    this.broadcastMarketUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, result.game);
+  }
+
+  @SubscribeMessage('negotiate_price')
+  async handleNegotiatePrice(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { orderId: string; offerPrice: number }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.tradeService.negotiatePrice(
+      clientInfo.gameId,
+      game,
+      data.orderId,
+      clientInfo.playerId,
+      data.offerPrice
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    client.emit('negotiation_created', {
+      negotiation: result.negotiation,
+      order: result.order
+    });
+
+    const sellerSocket = this.findSocketByPlayerId(clientInfo.gameId, result.order.sellerId);
+    if (sellerSocket) {
+      this.server.to(sellerSocket).emit('negotiation_received', {
+        negotiation: result.negotiation,
+        order: result.order
+      });
+    }
+
+    this.broadcastMarketUpdate(clientInfo.gameId);
+  }
+
+  @SubscribeMessage('respond_negotiate')
+  async handleRespondNegotiation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { orderId: string; accept: boolean }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.tradeService.respondNegotiation(
+      clientInfo.gameId,
+      game,
+      data.orderId,
+      clientInfo.playerId,
+      data.accept
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    if (result.accepted && result.order) {
+      await this.gameState.saveGame(game);
+
+      client.emit('negotiation_responded', {
+        accepted: true,
+        order: result.order,
+        negotiation: result.negotiation
+      });
+
+      const buyerSocket = this.findSocketByPlayerId(clientInfo.gameId, result.negotiation!.buyerId);
+      if (buyerSocket) {
+        this.server.to(buyerSocket).emit('negotiation_accepted', {
+          order: result.order,
+          negotiation: result.negotiation,
+          taxAmount: result.taxAmount
+        });
+      }
+
+      this.broadcastMarketUpdate(clientInfo.gameId);
+      this.broadcastGameState(game.id, game);
+    } else {
+      client.emit('negotiation_responded', {
+        accepted: false,
+        negotiation: result.negotiation
+      });
+
+      const buyerSocket = this.findSocketByPlayerId(clientInfo.gameId, result.negotiation!.buyerId);
+      if (buyerSocket) {
+        this.server.to(buyerSocket).emit('negotiation_rejected', {
+          negotiation: result.negotiation,
+          orderId: data.orderId
+        });
+      }
+
+      this.broadcastMarketUpdate(clientInfo.gameId);
+    }
+  }
+
+  private findSocketByPlayerId(gameId: string, playerId: string): string | null {
+    for (const [socketId, info] of Object.entries(this.clients)) {
+      if (info.gameId === gameId && info.playerId === playerId) {
+        return socketId;
+      }
+    }
+    return null;
+  }
+
   private async broadcastMarketUpdate(gameId: string) {
+    const game = await this.gameState.getGame(gameId);
+    if (!game) return;
+
     const orders = await this.tradeService.getMarketOrders(gameId);
-    this.server.to(gameId).emit('market_update', { orders });
+    const stats = await this.tradeService.getMarketStats(gameId, game);
+
+    this.server.to(gameId).emit('market_update', {
+      orders,
+      stats,
+      publicFunds: game.publicFunds || 0,
+      taxRate: game.tradeTaxRate || 0.05
+    });
   }
 
   private broadcastGameState(gameId: string, game: any) {
@@ -389,7 +586,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       seedShop: game.seedShop,
       currentEvents: game.currentEvents,
       allSpecies: game.allSpecies,
-      cityTouristBase: game.cityTouristBase
+      cityTouristBase: game.cityTouristBase,
+      publicFunds: game.publicFunds || 0,
+      tradeTaxRate: game.tradeTaxRate || 0.05
     };
   }
 }

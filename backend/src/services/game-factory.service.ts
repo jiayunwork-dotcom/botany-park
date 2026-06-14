@@ -33,7 +33,9 @@ export class GameFactoryService {
       cityTouristBase: GAME_CONFIG.CITY_TOURIST_BASE,
       actionsSubmitted: {},
       allSpecies: { ...PLANT_DATABASE },
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
+      publicFunds: 0,
+      tradeTaxRate: 0.05
     };
 
     game.players[hostId] = this.createPlayer(hostId, hostName, hostSocketId);

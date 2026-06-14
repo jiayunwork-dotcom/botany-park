@@ -211,6 +211,12 @@ export class GameStateService {
       events.push(`${order.sellerName} 的 ${order.quantity} 颗 ${speciesName} 种子挂单已过期，种子已退回`);
     }
 
+    const dividendResult = this.tradeService.distributeMarketDividend(game);
+    if (dividendResult.dividendPerPlayer > 0) {
+      events.push(`【市场红利】公共资金池 ${dividendResult.dividendPerPlayer * (Object.values(game.players).filter(p => !p.isBankrupt).length)} 金币已均分，每人获得 ${dividendResult.dividendPerPlayer} 金币`);
+      events.push(...dividendResult.events);
+    }
+
     for (const playerId of game.playerOrder) {
       game.actionsSubmitted[playerId] = false;
       const player = game.players[playerId];
