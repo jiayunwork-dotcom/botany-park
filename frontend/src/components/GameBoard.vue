@@ -30,6 +30,9 @@
           <el-tab-pane label="交易市场" name="market">
             <TradeMarket />
           </el-tab-pane>
+          <el-tab-pane label="🏛️ 拍卖行" name="auction">
+            <AuctionHouse />
+          </el-tab-pane>
         </el-tabs>
 
         <ActionPanel @submit="submitActions" />
@@ -65,6 +68,7 @@ import GameMap from './GameMap.vue';
 import OtherPlayersView from './OtherPlayersView.vue';
 import PlantCodex from './PlantCodex.vue';
 import TradeMarket from './TradeMarket.vue';
+import AuctionHouse from './AuctionHouse.vue';
 import ResearchPanel from './ResearchPanel.vue';
 import LeaderboardView from './LeaderboardView.vue';
 import TurnEvents from './TurnEvents.vue';

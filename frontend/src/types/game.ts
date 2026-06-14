@@ -243,3 +243,53 @@ export interface MarketOrder {
   status: MarketOrderStatus;
   currentNegotiation?: Negotiation | null;
 }
+
+export enum AuctionStatus {
+  ACTIVE = 'active',
+  SETTLED = 'settled',
+  CANCELLED = 'cancelled',
+  FAILED = 'failed'
+}
+
+export interface AuctionBid {
+  id: string;
+  auctionId: string;
+  bidderId: string;
+  bidderName: string;
+  amount: number;
+  createdAt: number;
+  createdAtTurn: number;
+}
+
+export interface Auction {
+  id: string;
+  sellerId: string;
+  sellerName: string;
+  speciesId: string;
+  quantity: number;
+  startPrice: number;
+  minIncrement: number;
+  totalTurns: number;
+  turnsLeft: number;
+  createdAtTurn: number;
+  currentHighBid: number;
+  currentHighBidderId: string | null;
+  currentHighBidderName: string | null;
+  bids: AuctionBid[];
+  status: AuctionStatus;
+  winnerId: string | null;
+  winnerName: string | null;
+  finalPrice: number | null;
+  settledAtTurn: number | null;
+}
+
+export interface AuctionSettlementResult {
+  auctionId: string;
+  success: boolean;
+  winnerId: string | null;
+  winnerName: string | null;
+  finalPrice: number | null;
+  taxAmount: number;
+  sellerReceive: number;
+  reason: string;
+}

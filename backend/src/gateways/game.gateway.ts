@@ -11,7 +11,8 @@ import { Server, Socket } from 'socket.io';
 import { GameStateService } from '../services/game-state.service';
 import { GameEngineService } from '../services/game-engine.service';
 import { TradeService } from '../services/trade.service';
-import { PlayerAction, GamePhase, MarketOrder, MarketSpeciesStats, Negotiation } from '../types/game.types';
+import { AuctionService } from '../services/auction.service';
+import { PlayerAction, GamePhase, MarketOrder, MarketSpeciesStats, Negotiation, Auction, AuctionBid, AuctionSettlementResult } from '../types/game.types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface ClientMap {
@@ -37,7 +38,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly gameState: GameStateService,
     private readonly gameEngine: GameEngineService,
-    private readonly tradeService: TradeService
+    private readonly tradeService: TradeService,
+    private readonly auctionService: AuctionService
   ) {}
 
   handleConnection(client: Socket) {
@@ -150,7 +152,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (this.gameState.allActionsSubmitted(game)) {
       const result = await this.gameState.processTurn(clientInfo.gameId);
       if (result) {
-        const { game: updatedGame, events, randomEvents, weatherForecast, expiredMarketOrders } = result;
+        const { game: updatedGame, events, randomEvents, weatherForecast, expiredMarketOrders, auctionSettlementResults } = result;
         const leaderboard = this.gameEngine.getLeaderboard(updatedGame);
 
         this.server.to(updatedGame.id).emit('turn_processed', {
@@ -160,8 +162,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           randomEvents,
           weatherForecast,
           leaderboard,
-          expiredMarketOrders
+          expiredMarketOrders,
+          auctionSettlementResults
         });
+
+        if (auctionSettlementResults && auctionSettlementResults.length > 0) {
+          for (const settlementResult of auctionSettlementResults) {
+            this.server.to(updatedGame.id).emit('auction_settled', settlementResult);
+          }
+        }
 
         if (updatedGame.phase === GamePhase.FINISHED) {
           this.server.to(updatedGame.id).emit('game_finished', {
@@ -171,6 +180,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         this.broadcastGameState(updatedGame.id, updatedGame);
         this.broadcastMarketUpdate(updatedGame.id);
+        this.broadcastAuctionUpdate(updatedGame.id);
       }
     } else {
       this.broadcastGameState(game.id, game);
@@ -527,6 +537,129 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('get_auctions')
+  async handleGetAuctions(
+    @ConnectedSocket() client: Socket
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const auctions = await this.auctionService.getAuctions(clientInfo.gameId);
+    client.emit('auctions_update', { auctions });
+  }
+
+  @SubscribeMessage('create_auction')
+  async handleCreateAuction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { speciesId: string; quantity: number; startPrice: number; minIncrement: number; totalTurns: number }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.auctionService.createAuction(
+      clientInfo.gameId,
+      game,
+      clientInfo.playerId,
+      data.speciesId,
+      data.quantity,
+      data.startPrice,
+      data.minIncrement,
+      data.totalTurns
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    await this.gameState.saveGame(result.game);
+    client.emit('auction_created', { auction: result.auction });
+    this.broadcastAuctionUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, result.game);
+  }
+
+  @SubscribeMessage('cancel_auction')
+  async handleCancelAuction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { auctionId: string }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game) return;
+
+    const result = await this.auctionService.cancelAuction(
+      clientInfo.gameId,
+      game,
+      data.auctionId,
+      clientInfo.playerId
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    await this.gameState.saveGame(result.game);
+    client.emit('auction_cancelled', { auction: result.auction });
+    this.broadcastAuctionUpdate(clientInfo.gameId);
+    this.broadcastGameState(game.id, result.game);
+  }
+
+  @SubscribeMessage('place_bid')
+  async handlePlaceBid(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { auctionId: string; bidAmount: number }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) {
+      client.emit('error', { message: '游戏未开始' });
+      return;
+    }
+
+    const result = await this.auctionService.placeBid(
+      clientInfo.gameId,
+      game,
+      data.auctionId,
+      clientInfo.playerId,
+      data.bidAmount
+    );
+
+    if ('error' in result) {
+      client.emit('error', { message: result.error });
+      return;
+    }
+
+    client.emit('bid_placed', { auction: result.auction, bid: result.bid });
+
+    const participantIds = await this.auctionService.getAuctionParticipantIds(result.auction);
+    for (const pid of participantIds) {
+      if (pid === clientInfo.playerId) continue;
+      const participantSocket = this.findSocketByPlayerId(clientInfo.gameId, pid);
+      if (participantSocket) {
+        this.server.to(participantSocket).emit('auction_bid_notification', {
+          auctionId: result.auction.id,
+          currentHighBid: result.auction.currentHighBid,
+          bidderName: result.bid.bidderName,
+          speciesId: result.auction.speciesId,
+          quantity: result.auction.quantity
+        });
+      }
+    }
+
+    this.broadcastAuctionUpdate(clientInfo.gameId);
+  }
+
   private findSocketByPlayerId(gameId: string, playerId: string): string | null {
     for (const [socketId, info] of Object.entries(this.clients)) {
       if (info.gameId === gameId && info.playerId === playerId) {
@@ -549,6 +682,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       publicFunds: game.publicFunds || 0,
       taxRate: game.tradeTaxRate || 0.05
     });
+  }
+
+  private async broadcastAuctionUpdate(gameId: string) {
+    const auctions = await this.auctionService.getAuctions(gameId);
+    this.server.to(gameId).emit('auctions_update', { auctions });
   }
 
   private broadcastGameState(gameId: string, game: any) {

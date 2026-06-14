@@ -11,12 +11,14 @@ import {
   ResearchProject,
   RandomEvent,
   WeatherForecast,
-  MarketOrder
+  MarketOrder,
+  AuctionSettlementResult
 } from '../types/game.types';
 import { RedisService } from './redis.service';
 import { GameFactoryService } from './game-factory.service';
 import { GameEngineService } from './game-engine.service';
 import { TradeService } from './trade.service';
+import { AuctionService } from './auction.service';
 import { getPlantById, PLANT_DATABASE } from '../data/plants.data';
 import { GAME_CONFIG } from '../config/game.config';
 import { v4 as uuidv4 } from 'uuid';
@@ -29,7 +31,8 @@ export class GameStateService {
     private readonly redis: RedisService,
     private readonly gameFactory: GameFactoryService,
     private readonly gameEngine: GameEngineService,
-    private readonly tradeService: TradeService
+    private readonly tradeService: TradeService,
+    private readonly auctionService: AuctionService
   ) {}
 
   private getGameKey(gameId: string): string {
@@ -143,6 +146,7 @@ export class GameStateService {
     randomEvents: RandomEvent[];
     weatherForecast: WeatherForecast;
     expiredMarketOrders: MarketOrder[];
+    auctionSettlementResults: AuctionSettlementResult[];
   } | null> {
     const game = await this.getGame(gameId);
     if (!game || game.phase !== GamePhase.PLAYING) return null;
@@ -151,6 +155,7 @@ export class GameStateService {
     const events: string[] = [];
     const randomEvents: RandomEvent[] = [];
     let expiredMarketOrders: MarketOrder[] = [];
+    let auctionSettlementResults: AuctionSettlementResult[] = [];
 
     for (const playerId of game.playerOrder) {
       const player = game.players[playerId];
@@ -211,6 +216,13 @@ export class GameStateService {
       events.push(`${order.sellerName} 的 ${order.quantity} 颗 ${speciesName} 种子挂单已过期，种子已退回`);
     }
 
+    const auctionExpiryResult = await this.auctionService.processTurnExpiry(gameId, game);
+    auctionSettlementResults = auctionExpiryResult.settledResults;
+
+    for (const result of auctionSettlementResults) {
+      events.push(`【拍卖行】${result.reason}`);
+    }
+
     const dividendResult = this.tradeService.distributeMarketDividend(game);
     if (dividendResult.dividendPerPlayer > 0) {
       events.push(`【市场红利】公共资金池 ${dividendResult.dividendPerPlayer * (Object.values(game.players).filter(p => !p.isBankrupt).length)} 金币已均分，每人获得 ${dividendResult.dividendPerPlayer} 金币`);
@@ -236,7 +248,7 @@ export class GameStateService {
     const weatherForecast = this.gameEngine.getWeatherForecast(game);
 
     await this.saveGame(game);
-    return { game, events, randomEvents, weatherForecast, expiredMarketOrders };
+    return { game, events, randomEvents, weatherForecast, expiredMarketOrders, auctionSettlementResults };
   }
 
   private executePlayerActions(player: PlayerState, game: GameState, events: string[]) {
