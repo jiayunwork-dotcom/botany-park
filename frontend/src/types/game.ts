@@ -97,6 +97,7 @@ export interface PlantSpecies {
   rarity: Rarity;
   price: number;
   description: string;
+  disasterResistance?: number;
 }
 
 export interface PlantInstance {
@@ -110,6 +111,7 @@ export interface PlantInstance {
   isWild: boolean;
   domesticationTurns: number;
   insurance?: InsurancePolicy | null;
+  recoveryState?: RecoveryState | null;
 }
 
 export interface PlayerAction {
@@ -143,6 +145,8 @@ export interface PlayerState {
   researchProjects: ResearchProject[];
   discoveredSpecies: string[];
   actionsSubmitted: boolean;
+  claimRecords?: InsuranceClaimRecord[];
+  insuranceStats?: InsuranceStats;
 }
 
 export interface GameState {
@@ -161,6 +165,7 @@ export interface GameState {
   publicFunds: number;
   tradeTaxRate: number;
   currentWeather: WeatherEvent | null;
+  nextTurnForecast: NextTurnForecast | null;
 }
 
 export interface LeaderboardEntry {
@@ -388,4 +393,39 @@ export interface InsurancePurchaseResult {
   error?: string;
   premium?: number;
   plantValue?: number;
+}
+
+export interface RecoveryState {
+  isActive: boolean;
+  recoveryPerTurn: number;
+  originalDamageLevel: DamageLevel;
+}
+
+export interface InsuranceClaimRecord {
+  turn: number;
+  speciesName: string;
+  disasterType: WeatherType;
+  payoutAmount: number;
+}
+
+export interface InsuranceStats {
+  totalPolicies: number;
+  totalPremiumsPaid: number;
+  totalClaimsReceived: number;
+}
+
+export interface NextTurnForecast {
+  weatherType: WeatherType;
+  weatherName: string;
+  weatherIcon: string;
+  severity: number;
+  isDisaster: boolean;
+  accuracy: number;
+}
+
+export interface BatchInsuranceResult {
+  insured: { x: number; y: number; speciesName: string; premium: number }[];
+  skipped: { x: number; y: number; speciesName: string; reason: string }[];
+  totalPremium: number;
+  success: boolean;
 }

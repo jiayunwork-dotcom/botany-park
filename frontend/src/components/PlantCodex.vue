@@ -70,6 +70,10 @@
                 <span class="stat-label">💰 价格</span>
                 <span>{{ species.price }}</span>
               </div>
+              <div class="stat">
+                <span class="stat-label">🛡️ 抗灾</span>
+                <span>{{ getResistanceLabel(species.disasterResistance) }}</span>
+              </div>
             </div>
           </el-card>
         </div>
@@ -147,6 +151,15 @@ function getEcologyIcon(type: string) {
     allelopathy: '⚠️ 化感作用'
   };
   return map[type] || type;
+}
+
+function getResistanceLabel(resistance?: number): string {
+  if (resistance === undefined || resistance === null) return '无';
+  const pct = Math.round(resistance * 100);
+  if (pct >= 70) return `极强(${pct}%)`;
+  if (pct >= 50) return `较强(${pct}%)`;
+  if (pct >= 30) return `一般(${pct}%)`;
+  return `较弱(${pct}%)`;
 }
 </script>
 

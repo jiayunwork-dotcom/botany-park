@@ -16,7 +16,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 40,
     rarity: Rarity.COMMON,
     price: 200,
-    description: '长寿乔木，观赏价值随年龄增长'
+    description: '长寿乔木，观赏价值随年龄增长',
+    disasterResistance: 0.7
   },
   'pine': {
     id: 'pine',
@@ -34,7 +35,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.COMMON,
     price: 180,
     description: '常绿针叶树，适应性强',
-    competitionGroup: 'tall_trees'
+    competitionGroup: 'tall_trees',
+    disasterResistance: 0.75
   },
   'maple': {
     id: 'maple',
@@ -52,7 +54,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.UNCOMMON,
     price: 350,
     description: '秋季红叶观赏价值极高',
-    competitionGroup: 'tall_trees'
+    competitionGroup: 'tall_trees',
+    disasterResistance: 0.5
   },
   'rose': {
     id: 'rose',
@@ -70,7 +73,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.COMMON,
     price: 100,
     description: '经典观赏花卉，花期长',
-    pollinationPartners: ['lavender', 'marigold']
+    pollinationPartners: ['lavender', 'marigold'],
+    disasterResistance: 0.3
   },
   'lavender': {
     id: 'lavender',
@@ -88,7 +92,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.COMMON,
     price: 90,
     description: '芳香植物，吸引传粉昆虫',
-    pollinationPartners: ['rose', 'sunflower']
+    pollinationPartners: ['rose', 'sunflower'],
+    disasterResistance: 0.45
   },
   'sunflower': {
     id: 'sunflower',
@@ -106,7 +111,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.COMMON,
     price: 40,
     description: '一年生草本，夏季开花',
-    pollinationPartners: ['lavender', 'marigold']
+    pollinationPartners: ['lavender', 'marigold'],
+    disasterResistance: 0.2
   },
   'tulip': {
     id: 'tulip',
@@ -123,7 +129,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 5,
     rarity: Rarity.UNCOMMON,
     price: 70,
-    description: '春季球根花卉'
+    description: '春季球根花卉',
+    disasterResistance: 0.25
   },
   'marigold': {
     id: 'marigold',
@@ -142,7 +149,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     price: 30,
     description: '常见园艺花卉，驱虫效果',
     pollinationPartners: ['rose', 'sunflower'],
-    allelopathyTargets: ['cabbage_moth_hosts']
+    allelopathyTargets: ['cabbage_moth_hosts'],
+    disasterResistance: 0.35
   },
   'grape': {
     id: 'grape',
@@ -160,7 +168,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.UNCOMMON,
     price: 150,
     description: '藤本植物，需要支撑结构',
-    symbiosisPartners: ['clover']
+    symbiosisPartners: ['clover'],
+    disasterResistance: 0.4
   },
   'morning_glory': {
     id: 'morning_glory',
@@ -177,7 +186,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 3,
     rarity: Rarity.COMMON,
     price: 35,
-    description: '一年生藤本，朝开暮合'
+    description: '一年生藤本，朝开暮合',
+    disasterResistance: 0.15
   },
   'lotus': {
     id: 'lotus',
@@ -194,7 +204,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 15,
     rarity: Rarity.UNCOMMON,
     price: 180,
-    description: '水生植物，池塘专用'
+    description: '水生植物，池塘专用',
+    disasterResistance: 0.35
   },
   'water_lily': {
     id: 'water_lily',
@@ -211,7 +222,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 12,
     rarity: Rarity.COMMON,
     price: 120,
-    description: '浮水植物，白天开花'
+    description: '浮水植物，白天开花',
+    disasterResistance: 0.3
   },
   'cactus': {
     id: 'cactus',
@@ -228,7 +240,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 30,
     rarity: Rarity.COMMON,
     price: 80,
-    description: '耐旱多肉，怕积水'
+    description: '耐旱多肉，怕积水',
+    disasterResistance: 0.8
   },
   'aloe': {
     id: 'aloe',
@@ -245,7 +258,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 18,
     rarity: Rarity.COMMON,
     price: 60,
-    description: '药用多肉植物'
+    description: '药用多肉植物',
+    disasterResistance: 0.7
   },
   'clover': {
     id: 'clover',
@@ -263,7 +277,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.COMMON,
     price: 20,
     description: '固氮植物，改善土壤',
-    symbiosisPartners: ['grape', 'oak']
+    symbiosisPartners: ['grape', 'oak'],
+    disasterResistance: 0.5
   },
   'cherry': {
     id: 'cherry',
@@ -281,7 +296,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.RARE,
     price: 600,
     description: '春季观赏名树，花期绚烂',
-    competitionGroup: 'tall_trees'
+    competitionGroup: 'tall_trees',
+    disasterResistance: 0.25
   },
   'orchid': {
     id: 'orchid',
@@ -298,7 +314,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 20,
     rarity: Rarity.RARE,
     price: 400,
-    description: '名贵观赏花卉'
+    description: '名贵观赏花卉',
+    disasterResistance: 0.15
   },
   'ginkgo': {
     id: 'ginkgo',
@@ -316,7 +333,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     rarity: Rarity.EPIC,
     price: 1500,
     description: '古老孑遗植物，活化石',
-    competitionGroup: 'tall_trees'
+    competitionGroup: 'tall_trees',
+    disasterResistance: 0.85
   },
   'corpse_flower': {
     id: 'corpse_flower',
@@ -333,7 +351,8 @@ export const PLANT_DATABASE: { [id: string]: PlantSpecies } = {
     lifespan: 40,
     rarity: Rarity.LEGENDARY,
     price: 3000,
-    description: '世界最大花卉，极为稀有'
+    description: '世界最大花卉，极为稀有',
+    disasterResistance: 0.1
   }
 };
 

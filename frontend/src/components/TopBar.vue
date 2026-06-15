@@ -5,6 +5,15 @@
       <span class="turn">
         回合 {{ gameStore.gameState?.turn }} / {{ gameStore.gameState?.maxTurns }}
       </span>
+      <Transition name="warning-blink">
+        <span
+          v-if="gameStore.nextTurnForecast?.isDisaster"
+          class="forecast-warning"
+          :title="`下回合预警: ${gameStore.nextTurnForecast.weatherName} (准确率${Math.round(gameStore.nextTurnForecast.accuracy * 100)}%)`"
+        >
+          ⚠️ {{ gameStore.nextTurnForecast.weatherIcon }} {{ gameStore.nextTurnForecast.weatherName }}
+        </span>
+      </Transition>
     </div>
 
     <div class="weather-forecast">
@@ -15,6 +24,19 @@
           <div class="season-params">
             <span class="param">☀️ {{ currentLight }}</span>
             <span class="param">🌡️ {{ currentTemp }}°C</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="gameStore.nextTurnForecast" class="next-turn-forecast">
+        <span class="arrow">→</span>
+        <div class="forecast-info">
+          <span class="forecast-icon" :class="{ 'disaster-forecast': gameStore.nextTurnForecast.isDisaster }">
+            {{ gameStore.nextTurnForecast.weatherIcon }}
+          </span>
+          <div class="forecast-detail">
+            <span class="forecast-name">{{ gameStore.nextTurnForecast.weatherName }}</span>
+            <span class="forecast-accuracy">预报准确率 {{ Math.round(gameStore.nextTurnForecast.accuracy * 100) }}%</span>
           </div>
         </div>
       </div>
@@ -179,6 +201,70 @@ function copyRoomId() {
   background: rgba(255, 255, 255, 0.1);
   padding: 4px 10px;
   border-radius: 6px;
+}
+
+.forecast-warning {
+  background: rgba(255, 152, 0, 0.9);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: bold;
+  animation: warning-blink-anim 1s ease-in-out infinite;
+  color: white;
+}
+
+@keyframes warning-blink-anim {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.warning-blink-enter-active,
+.warning-blink-leave-active {
+  transition: all 0.3s;
+}
+
+.warning-blink-enter-from,
+.warning-blink-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+.next-turn-forecast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.forecast-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.forecast-icon {
+  font-size: 22px;
+}
+
+.forecast-icon.disaster-forecast {
+  filter: drop-shadow(0 0 6px rgba(255, 152, 0, 0.8));
+}
+
+.forecast-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.forecast-name {
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.forecast-accuracy {
+  font-size: 10px;
+  opacity: 0.7;
 }
 
 .weather-forecast {

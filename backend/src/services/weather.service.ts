@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Season, WeatherEvent, WeatherType } from '../types/game.types';
+import { Season, WeatherEvent, WeatherType, NextTurnForecast } from '../types/game.types';
 import { WEATHER_CONFIG, WEATHER_PROBABILITY_BY_SEASON } from '../config/weather.config';
 
 @Injectable()
@@ -48,6 +48,41 @@ export class WeatherService {
       severity: defaultConfig.severity,
       turn,
       season
+    };
+  }
+
+  generateForecast(
+    season: Season,
+    nextTurn: number,
+    gameSeed: number
+  ): NextTurnForecast {
+    const actualWeather = this.generateWeather(season, nextTurn, gameSeed);
+    const forecastAccuracy = 0.7;
+    const rand = Math.random();
+
+    if (rand < forecastAccuracy) {
+      return {
+        weatherType: actualWeather.type,
+        weatherName: actualWeather.name,
+        weatherIcon: actualWeather.icon,
+        severity: actualWeather.severity,
+        isDisaster: actualWeather.severity > 0,
+        accuracy: forecastAccuracy
+      };
+    }
+
+    const allTypes = Object.values(WeatherType);
+    const otherTypes = allTypes.filter(t => t !== actualWeather.type);
+    const predictedType = otherTypes[Math.floor(Math.random() * otherTypes.length)];
+    const predictedConfig = WEATHER_CONFIG[predictedType];
+
+    return {
+      weatherType: predictedType,
+      weatherName: predictedConfig.name,
+      weatherIcon: predictedConfig.icon,
+      severity: predictedConfig.severity,
+      isDisaster: predictedConfig.severity > 0,
+      accuracy: forecastAccuracy
     };
   }
 

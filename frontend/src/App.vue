@@ -12,7 +12,7 @@ import GameLobby from './components/GameLobby.vue';
 import GameBoard from './components/GameBoard.vue';
 import { useGameStore } from './stores/game';
 import { initSocket, socket } from './services/socket';
-import type { RandomEvent, WeatherForecast, Auction, AuctionBid, AuctionSettlementResult, WeatherEvent, PlayerDisasterResult, InsurancePurchaseResult } from './types/game';
+import type { RandomEvent, WeatherForecast, Auction, AuctionBid, AuctionSettlementResult, WeatherEvent, PlayerDisasterResult, InsurancePurchaseResult, NextTurnForecast, BatchInsuranceResult } from './types/game';
 
 const gameStore = useGameStore();
 
@@ -46,6 +46,7 @@ onMounted(async () => {
       leaderboard: any[];
       auctionSettlementResults?: AuctionSettlementResult[];
       weatherEvent?: WeatherEvent;
+      nextTurnForecast?: NextTurnForecast;
     }) => {
       gameStore.addTurnEvents(data.events);
       gameStore.setLeaderboard(data.leaderboard);
@@ -57,6 +58,10 @@ onMounted(async () => {
 
       if (data.weatherEvent) {
         gameStore.setCurrentWeather(data.weatherEvent);
+      }
+
+      if (data.nextTurnForecast) {
+        gameStore.setNextTurnForecast(data.nextTurnForecast);
       }
 
       if (data.randomEvents && data.randomEvents.length > 0) {
@@ -162,6 +167,10 @@ onMounted(async () => {
       if (weather.severity > 0) {
         ElMessage.warning(`⚠️ 天气灾害：${weather.icon} ${weather.name} - ${weather.description}`);
       }
+    });
+
+    socket.value?.on('weather_forecast', (forecast: NextTurnForecast) => {
+      gameStore.setNextTurnForecast(forecast);
     });
 
     socket.value?.on('disaster_result', (result: PlayerDisasterResult) => {

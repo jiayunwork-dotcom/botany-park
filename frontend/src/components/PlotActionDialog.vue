@@ -28,6 +28,10 @@
         <p>生长进度: {{ Math.round((plot.plant.biomass / plot.plant.maxBiomass) * 100) }}%</p>
         <p>年龄: {{ plot.plant.age }} 回合</p>
         <p v-if="plot.plant.isBlooming" style="color: #e91e63;">🌸 正在开花！</p>
+        <div v-if="plot.plant.recoveryState?.isActive" class="recovery-info">
+          <span class="recovery-badge">➕ 恢复中</span>
+          <span class="recovery-detail">每回合恢复 {{ plot.plant.recoveryState.recoveryPerTurn }} 健康值</span>
+        </div>
       </div>
 
       <div v-if="plot.plant.insurance" class="insurance-info">
@@ -104,11 +108,11 @@
               :key="type"
               class="upgrade-item"
               :class="{ disabled: player.money < info.cost }"
-              @click="player.money >= info.cost && doUpgrade(type)"
+              @click="player.money >= info.cost && doUpgrade(String(type))"
             >
-              <span class="upgrade-icon">{{ getPlotIcon(type) }}</span>
+              <span class="upgrade-icon">{{ getPlotIcon(String(type)) }}</span>
               <div class="upgrade-info">
-                <span class="upgrade-name">{{ getPlotTypeName(type) }}</span>
+                <span class="upgrade-name">{{ getPlotTypeName(String(type)) }}</span>
                 <span class="upgrade-cost">💰 {{ info.cost }} ({{ info.turns }}回合)</span>
               </div>
             </div>
@@ -416,5 +420,27 @@ async function doPurchaseInsurance() {
 .dialog-footer {
   margin-top: 16px;
   text-align: right;
+}
+
+.recovery-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: #e8f5e9;
+  border-radius: 6px;
+  border-left: 3px solid #4caf50;
+}
+
+.recovery-badge {
+  font-size: 13px;
+  font-weight: bold;
+  color: #2e7d32;
+}
+
+.recovery-detail {
+  font-size: 12px;
+  color: #555;
 }
 </style>

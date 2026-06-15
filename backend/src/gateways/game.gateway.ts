@@ -12,7 +12,7 @@ import { GameStateService } from '../services/game-state.service';
 import { GameEngineService } from '../services/game-engine.service';
 import { TradeService } from '../services/trade.service';
 import { AuctionService } from '../services/auction.service';
-import { PlayerAction, GamePhase, MarketOrder, MarketSpeciesStats, Negotiation, Auction, AuctionBid, AuctionSettlementResult } from '../types/game.types';
+import { PlayerAction, GamePhase, MarketOrder, MarketSpeciesStats, Negotiation, Auction, AuctionBid, AuctionSettlementResult, NextTurnForecast, BatchInsuranceResult } from '../types/game.types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface ClientMap {
@@ -164,11 +164,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           leaderboard,
           expiredMarketOrders,
           auctionSettlementResults,
-          weatherEvent
+          weatherEvent,
+          nextTurnForecast: updatedGame.nextTurnForecast
         });
 
         if (weatherEvent) {
           this.server.to(updatedGame.id).emit('weather_event', weatherEvent);
+        }
+
+        if (updatedGame.nextTurnForecast) {
+          this.server.to(updatedGame.id).emit('weather_forecast', updatedGame.nextTurnForecast);
         }
 
         if (disasterResults && disasterResults.length > 0) {
@@ -841,6 +846,31 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('batch_purchase_insurance')
+  async handleBatchPurchaseInsurance(
+    @ConnectedSocket() client: Socket
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const result = await this.gameState.batchPurchaseInsurance(
+      clientInfo.gameId,
+      clientInfo.playerId
+    );
+
+    if (!result) {
+      client.emit('error', { message: '批量投保失败' });
+      return;
+    }
+
+    client.emit('batch_insurance_result', result);
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (game) {
+      this.broadcastGameState(game.id, game);
+    }
+  }
+
   private findSocketByPlayerId(gameId: string, playerId: string): string | null {
     for (const [socketId, info] of Object.entries(this.clients)) {
       if (info.gameId === gameId && info.playerId === playerId) {
@@ -908,7 +938,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       cityTouristBase: game.cityTouristBase,
       publicFunds: game.publicFunds || 0,
       tradeTaxRate: game.tradeTaxRate || 0.05,
-      currentWeather: game.currentWeather || null
+      currentWeather: game.currentWeather || null,
+      nextTurnForecast: game.nextTurnForecast || null
     };
   }
 }

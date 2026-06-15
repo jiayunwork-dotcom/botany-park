@@ -69,6 +69,9 @@
             >
               🛡️
             </div>
+            <div v-if="plot.plant.recoveryState?.isActive" class="recovery-tag">
+              ➕
+            </div>
           </div>
 
           <div v-else class="plot-type-icon">
@@ -287,6 +290,24 @@ function handleClick(plot: Plot) {
 
 .insurance-tag.expired {
   background: rgba(158, 158, 158, 0.7);
+}
+
+.recovery-tag {
+  position: absolute;
+  bottom: 10px;
+  right: 1px;
+  font-size: 10px;
+  background: rgba(76, 175, 80, 0.9);
+  color: white;
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-weight: bold;
+  animation: recovery-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes recovery-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .plot-type-icon {

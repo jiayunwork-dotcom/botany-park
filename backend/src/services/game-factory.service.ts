@@ -38,7 +38,8 @@ export class GameFactoryService {
       publicFunds: 0,
       tradeTaxRate: 0.05,
       gameSeed,
-      currentWeather: null
+      currentWeather: null,
+      nextTurnForecast: null
     };
 
     game.players[hostId] = this.createPlayer(hostId, hostName, hostSocketId);
@@ -67,7 +68,9 @@ export class GameFactoryService {
       discoveredSpecies: ['rose', 'sunflower', 'clover', 'lavender', 'oak', 'pine', 'maple'],
       actions: [],
       lastTurnSnapshot: null,
-      endangeredPlants: []
+      endangeredPlants: [],
+      claimRecords: [],
+      insuranceStats: { totalPolicies: 0, totalPremiumsPaid: 0, totalClaimsReceived: 0 }
     };
   }
 

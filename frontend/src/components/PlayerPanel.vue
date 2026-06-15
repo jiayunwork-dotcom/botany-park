@@ -70,6 +70,60 @@
         暂无保险，点击植物可购买
       </div>
 
+      <el-button
+        type="warning"
+        size="small"
+        style="width: 100%; margin-top: 8px;"
+        :disabled="!canEdit || isBatchBuying"
+        :loading="isBatchBuying"
+        @click="handleBatchInsurance"
+      >
+        🛡️ 一键投保
+      </el-button>
+
+      <el-collapse class="claim-collapse">
+        <el-collapse-item title="📋 理赔记录" name="claims">
+          <div v-if="gameStore.claimRecords.length > 0" class="claim-list">
+            <div
+              v-for="(record, idx) in gameStore.claimRecords"
+              :key="idx"
+              class="claim-item"
+            >
+              <div class="claim-main">
+                <span class="claim-disaster">{{ getDisasterIcon(record.disasterType) }}</span>
+                <div class="claim-info">
+                  <span class="claim-species">{{ record.speciesName }}</span>
+                  <span class="claim-turn">第{{ record.turn }}回合</span>
+                </div>
+                <span class="claim-payout">+{{ record.payoutAmount }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty">暂无理赔记录</div>
+
+          <div v-if="gameStore.claimRecords.length > 0" class="claim-stats">
+            <div class="claim-stat-row">
+              <span>总投保次数</span>
+              <span class="stat-value">{{ gameStore.insuranceStats.totalPolicies }}</span>
+            </div>
+            <div class="claim-stat-row">
+              <span>总保费支出</span>
+              <span class="stat-value">{{ gameStore.insuranceStats.totalPremiumsPaid }}</span>
+            </div>
+            <div class="claim-stat-row">
+              <span>总理赔收入</span>
+              <span class="stat-value">{{ gameStore.insuranceStats.totalClaimsReceived }}</span>
+            </div>
+            <div class="claim-stat-row">
+              <span>净损益</span>
+              <span class="stat-value" :class="{ positive: insuranceNetBalance > 0, negative: insuranceNetBalance < 0 }">
+                {{ insuranceNetBalance >= 0 ? '+' : '' }}{{ insuranceNetBalance }}
+              </span>
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+
       <el-divider />
 
       <div class="section-title">种子库存</div>
@@ -88,11 +142,32 @@
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="batchDialogVisible" title="一键投保确认" width="420px" :close-on-click-modal="false">
+      <div v-if="batchPreview.length > 0" class="batch-preview">
+        <p class="batch-summary">将为 {{ batchPreview.length }} 株未投保植物购买保险</p>
+        <div class="batch-list">
+          <div v-for="item in batchPreview" :key="`${item.x}-${item.y}`" class="batch-item">
+            <span>{{ item.speciesName }} ({{ item.x }},{{ item.y }})</span>
+            <span>💰 {{ item.premium }}</span>
+          </div>
+        </div>
+        <div class="batch-total">
+          预估保费总计: 💰 {{ batchPreviewTotal }}
+        </div>
+      </div>
+      <div v-else class="empty">没有需要投保的植物</div>
+      <template #footer>
+        <el-button @click="batchDialogVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="batchPreview.length === 0" @click="confirmBatchInsurance">确认投保</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { ElMessage } from 'element-plus';
 import { useGameStore } from '../stores/game';
 
 const gameStore = useGameStore();
@@ -122,11 +197,80 @@ const seedEntries = computed(() => {
   return Object.entries(player.value.ownedSeeds).filter(([_, c]) => (c as number) > 0);
 });
 
+const insuranceNetBalance = computed(() => {
+  const stats = gameStore.insuranceStats;
+  return stats.totalClaimsReceived - stats.totalPremiumsPaid;
+});
+
+const isBatchBuying = ref(false);
+const batchDialogVisible = ref(false);
+
+const batchPreview = computed(() => {
+  if (!player.value) return [];
+  const items: { x: number; y: number; speciesName: string; premium: number }[] = [];
+  for (const row of player.value.plots) {
+    for (const plot of row) {
+      if (!plot.plant) continue;
+      if (plot.plant.insurance && plot.plant.insurance.status === 'active') continue;
+      const species = gameStore.allSpecies[plot.plant.speciesId];
+      if (!species) continue;
+      const growthRatio = plot.plant.biomass / plot.plant.maxBiomass;
+      const plantValue = Math.round(species.baseValue * (plot.plant.health / 100) * (0.3 + 0.7 * growthRatio));
+      const premium = Math.round(plantValue * 0.15);
+      items.push({ x: plot.x, y: plot.y, speciesName: species.name, premium });
+    }
+  }
+  items.sort((a, b) => b.premium - a.premium);
+  return items;
+});
+
+const batchPreviewTotal = computed(() => {
+  return batchPreview.value.reduce((sum, item) => sum + item.premium, 0);
+});
+
+function getDisasterIcon(disasterType: string): string {
+  const iconMap: any = {
+    rainstorm: '⛈️',
+    drought: '🏜️',
+    frost: '🧊',
+    typhoon: '🌀',
+    pest: '🐛'
+  };
+  return iconMap[disasterType] || '🌪️';
+}
+
 function updateTicket(val: number) {
   gameStore.addPendingAction({
     type: 'set_ticket',
     data: { price: val }
   });
+}
+
+function handleBatchInsurance() {
+  if (batchPreview.value.length === 0) {
+    ElMessage.info('没有需要投保的植物');
+    return;
+  }
+  batchDialogVisible.value = true;
+}
+
+async function confirmBatchInsurance() {
+  isBatchBuying.value = true;
+  try {
+    const result = await gameStore.batchPurchaseInsurance();
+    batchDialogVisible.value = false;
+    if (result.insured.length > 0) {
+      ElMessage.success(`成功为 ${result.insured.length} 株植物投保，保费总计 ${result.totalPremium}`);
+    }
+    if (result.skipped.length > 0) {
+      const skippedNames = result.skipped.map(s => s.speciesName).join('、');
+      ElMessage.warning(`因余额不足未能投保: ${skippedNames}`);
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '批量投保失败');
+  } finally {
+    isBatchBuying.value = false;
+  }
 }
 </script>
 
@@ -267,5 +411,128 @@ function updateTicket(val: number) {
   color: #999;
   text-align: center;
   padding: 8px;
+}
+
+.claim-collapse {
+  margin-top: 8px;
+  border: none;
+}
+
+.claim-collapse :deep(.el-collapse-item__header) {
+  font-size: 13px;
+  font-weight: bold;
+  color: #2d5a27;
+  background: transparent;
+  border: none;
+  height: 32px;
+  line-height: 32px;
+}
+
+.claim-collapse :deep(.el-collapse-item__wrap) {
+  border: none;
+  background: transparent;
+}
+
+.claim-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.claim-item {
+  padding: 4px 8px;
+  background: #fff3e0;
+  border-radius: 4px;
+  border-left: 3px solid #ff9800;
+}
+
+.claim-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.claim-disaster {
+  font-size: 14px;
+}
+
+.claim-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.claim-species {
+  font-weight: 500;
+  color: #333;
+}
+
+.claim-turn {
+  font-size: 10px;
+  color: #888;
+}
+
+.claim-payout {
+  font-weight: bold;
+  color: #4caf50;
+  font-size: 12px;
+}
+
+.claim-stats {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.claim-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.stat-value.positive {
+  color: #4caf50;
+}
+
+.stat-value.negative {
+  color: #f44336;
+}
+
+.batch-preview {
+  font-size: 14px;
+}
+
+.batch-summary {
+  font-weight: bold;
+  margin-bottom: 12px;
+  color: #333;
+}
+
+.batch-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.batch-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.batch-total {
+  font-weight: bold;
+  font-size: 14px;
+  color: #ff9800;
+  text-align: right;
 }
 </style>

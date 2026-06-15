@@ -16,7 +16,9 @@ import {
   WeatherEvent,
   PlayerDisasterResult,
   InsurancePurchaseResult,
-  InsurancePolicy
+  InsurancePolicy,
+  NextTurnForecast,
+  BatchInsuranceResult
 } from '../types/game.types';
 import { RedisService } from './redis.service';
 import { GameFactoryService } from './game-factory.service';
@@ -190,6 +192,12 @@ export class GameStateService {
       this.processPlantGrowth(player, game, events);
     }
 
+    for (const playerId of game.playerOrder) {
+      const player = game.players[playerId];
+      if (player.isBankrupt) continue;
+      this.disasterService.processRecovery(player);
+    }
+
     const weatherEvent = this.weatherService.generateWeather(game.season, game.turn, game.gameSeed);
     game.currentWeather = weatherEvent;
 
@@ -297,6 +305,10 @@ export class GameStateService {
     }
 
     const weatherForecast = this.gameEngine.getWeatherForecast(game);
+
+    const nextSeason = this.gameEngine.advanceSeason(game.season);
+    const nextTurnForecast = this.weatherService.generateForecast(nextSeason, game.turn + 1, game.gameSeed);
+    game.nextTurnForecast = nextTurnForecast;
 
     await this.saveGame(game);
     return { game, events, randomEvents, weatherForecast, expiredMarketOrders, auctionSettlementResults, weatherEvent, disasterResults };
@@ -731,5 +743,24 @@ export class GameStateService {
     const premium = this.insuranceService.calculatePremium(plot.plant, species);
 
     return { success: true, premium, plantValue };
+  }
+
+  async batchPurchaseInsurance(
+    gameId: string,
+    playerId: string
+  ): Promise<BatchInsuranceResult | null> {
+    const game = await this.getGame(gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) return null;
+
+    const player = game.players[playerId];
+    if (!player || player.isBankrupt) return null;
+
+    const result = this.insuranceService.batchPurchaseInsurance(player, game.turn);
+
+    if (result.success) {
+      await this.saveGame(game);
+    }
+
+    return result;
   }
 }

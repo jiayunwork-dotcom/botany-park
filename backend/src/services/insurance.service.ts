@@ -7,7 +7,8 @@ import {
   InsurancePolicy,
   InsurancePurchaseResult,
   InsuranceStatus,
-  PlantSpecies
+  PlantSpecies,
+  BatchInsuranceResult
 } from '../types/game.types';
 import { getPlantById } from '../data/plants.data';
 import { INSURANCE_CONFIG } from '../config/weather.config';
@@ -78,11 +79,77 @@ export class InsuranceService {
 
     plant.insurance = policy;
 
+    if (!player.insuranceStats) {
+      player.insuranceStats = { totalPolicies: 0, totalPremiumsPaid: 0, totalClaimsReceived: 0 };
+    }
+    player.insuranceStats.totalPolicies++;
+    player.insuranceStats.totalPremiumsPaid += premium;
+
     return {
       success: true,
       policy,
       premium,
       plantValue
+    };
+  }
+
+  batchPurchaseInsurance(
+    player: PlayerState,
+    currentTurn: number
+  ): BatchInsuranceResult {
+    const uninsuredPlots: { x: number; y: number; species: PlantSpecies; plantValue: number; premium: number }[] = [];
+
+    for (let y = 0; y < GAME_CONFIG.GRID_SIZE; y++) {
+      for (let x = 0; x < GAME_CONFIG.GRID_SIZE; x++) {
+        const plot = player.plots[y][x];
+        const plant = plot.plant;
+        if (!plant) continue;
+        if (plant.insurance && plant.insurance.status === InsuranceStatus.ACTIVE) continue;
+
+        const species = getPlantById(plant.speciesId);
+        if (!species) continue;
+
+        const plantValue = this.calculatePlantValue(plant, species);
+        const premium = this.calculatePremium(plant, species);
+        uninsuredPlots.push({ x, y, species, plantValue, premium });
+      }
+    }
+
+    uninsuredPlots.sort((a, b) => b.plantValue - a.plantValue);
+
+    const insured: BatchInsuranceResult['insured'] = [];
+    const skipped: BatchInsuranceResult['skipped'] = [];
+    let totalPremium = 0;
+    let remainingMoney = player.money;
+
+    for (const item of uninsuredPlots) {
+      if (remainingMoney >= item.premium) {
+        const result = this.purchaseInsurance(player, item.x, item.y, currentTurn);
+        if (result.success) {
+          insured.push({
+            x: item.x,
+            y: item.y,
+            speciesName: item.species.name,
+            premium: item.premium
+          });
+          totalPremium += item.premium;
+          remainingMoney -= item.premium;
+        }
+      } else {
+        skipped.push({
+          x: item.x,
+          y: item.y,
+          speciesName: item.species.name,
+          reason: '余额不足'
+        });
+      }
+    }
+
+    return {
+      insured,
+      skipped,
+      totalPremium,
+      success: insured.length > 0
     };
   }
 

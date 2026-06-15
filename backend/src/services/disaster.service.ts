@@ -10,7 +10,8 @@ import {
   DamageLevel,
   PlantCategory,
   PlantSpecies,
-  InsuranceStatus
+  InsuranceStatus,
+  RecoveryState
 } from '../types/game.types';
 import { getPlantById } from '../data/plants.data';
 import { DISASTER_DAMAGE } from '../config/weather.config';
@@ -124,7 +125,16 @@ export class DisasterService {
     }
 
     const severityMultiplier = 0.7 + weather.severity * 0.3;
-    const finalDamage = Math.round(baseDamage * vulnerabilityMultiplier * severityMultiplier);
+    let finalDamage = Math.round(baseDamage * vulnerabilityMultiplier * severityMultiplier);
+
+    const resistance = species.disasterResistance ?? 0;
+    if (resistance > 0) {
+      finalDamage = Math.round(finalDamage * (1 - resistance));
+    }
+
+    if (plot.type === 'greenhouse') {
+      finalDamage = Math.round(finalDamage * 0.7);
+    }
 
     let level: DamageLevel;
     if (finalDamage <= 0) {
@@ -182,6 +192,10 @@ export class DisasterService {
       const species = getPlantById(plant.speciesId);
       if (!species) continue;
 
+      if (plant.recoveryState?.isActive) {
+        plant.recoveryState = null;
+      }
+
       const { damage, level } = this.calculatePlantDamage(plant, plot, species, weather, random);
 
       if (damage > 0) {
@@ -195,6 +209,17 @@ export class DisasterService {
           insurancePayout = payout;
           totalInsurancePayout += payout;
           player.money += payout;
+
+          if (!player.claimRecords) player.claimRecords = [];
+          player.claimRecords.push({
+            turn,
+            speciesName: species.name,
+            disasterType: weather.type,
+            payoutAmount: payout
+          });
+          if (player.insuranceStats) {
+            player.insuranceStats.totalClaimsReceived += payout;
+          }
         }
 
         plant.health = healthAfter;
@@ -202,6 +227,13 @@ export class DisasterService {
         if (died) {
           plot.plant = null;
           totalDeathCount++;
+        } else {
+          const recoveryPerTurn = level === DamageLevel.LIGHT ? 5 : 10;
+          plant.recoveryState = {
+            isActive: true,
+            recoveryPerTurn,
+            originalDamageLevel: level
+          };
         }
 
         damages.push({
@@ -233,5 +265,22 @@ export class DisasterService {
       totalDeathCount,
       totalInsurancePayout
     };
+  }
+
+  processRecovery(player: PlayerState): void {
+    for (let y = 0; y < GAME_CONFIG.GRID_SIZE; y++) {
+      for (let x = 0; x < GAME_CONFIG.GRID_SIZE; x++) {
+        const plot = player.plots[y][x];
+        const plant = plot.plant;
+        if (!plant || !plant.recoveryState?.isActive) continue;
+
+        plant.health = Math.min(100, plant.health + plant.recoveryState.recoveryPerTurn);
+
+        if (plant.health >= 100) {
+          plant.health = 100;
+          plant.recoveryState = null;
+        }
+      }
+    }
   }
 }

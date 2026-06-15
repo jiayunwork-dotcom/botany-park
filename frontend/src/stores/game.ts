@@ -23,7 +23,11 @@ import type {
   WeatherEvent,
   PlayerDisasterResult,
   InsurancePolicy,
-  InsurancePurchaseResult
+  InsurancePurchaseResult,
+  NextTurnForecast,
+  InsuranceClaimRecord,
+  InsuranceStats,
+  BatchInsuranceResult
 } from '../types/game';
 
 export interface SeedSuitability {
@@ -64,6 +68,7 @@ export const useGameStore = defineStore('game', () => {
   const currentWeather = ref<WeatherEvent | null>(null);
   const lastDisasterResult = ref<PlayerDisasterResult | null>(null);
   const weatherEventHistory = ref<WeatherEvent[]>([]);
+  const nextTurnForecast = ref<NextTurnForecast | null>(null);
 
   const currentPlayer = computed<PlayerState | null>(() => {
     if (!gameState.value || !currentPlayerId.value) return null;
@@ -252,6 +257,10 @@ export const useGameStore = defineStore('game', () => {
     lastDisasterResult.value = result;
   }
 
+  function setNextTurnForecast(forecast: NextTurnForecast | null) {
+    nextTurnForecast.value = forecast;
+  }
+
   function clearWeatherHistory() {
     weatherEventHistory.value = [];
   }
@@ -276,6 +285,14 @@ export const useGameStore = defineStore('game', () => {
 
   const activeInsurances = computed(() => {
     return myInsurances.value.filter(item => item.policy.status === 'active');
+  });
+
+  const claimRecords = computed<InsuranceClaimRecord[]>(() => {
+    return currentPlayer.value?.claimRecords || [];
+  });
+
+  const insuranceStats = computed<InsuranceStats>(() => {
+    return currentPlayer.value?.insuranceStats || { totalPolicies: 0, totalPremiumsPaid: 0, totalClaimsReceived: 0 };
   });
 
   function purchaseInsurance(x: number, y: number): Promise<InsurancePurchaseResult> {
@@ -309,6 +326,37 @@ export const useGameStore = defineStore('game', () => {
 
       socket.value.once('insurance_purchased', handleResult);
       socket.value.emit('purchase_insurance', { x, y });
+    });
+  }
+
+  function batchPurchaseInsurance(): Promise<BatchInsuranceResult> {
+    return new Promise((resolve, reject) => {
+      if (!socket.value) {
+        reject(new Error('未连接到服务器'));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        reject(new Error('批量投保超时'));
+      }, 10000);
+
+      const handleResult = (result: BatchInsuranceResult) => {
+        clearTimeout(timeout);
+        socket.value?.off('batch_insurance_result', handleResult);
+        socket.value?.off('error', handleError);
+        resolve(result);
+      };
+
+      const handleError = (err: any) => {
+        clearTimeout(timeout);
+        socket.value?.off('batch_insurance_result', handleResult);
+        socket.value?.off('error', handleError);
+        reject(err);
+      };
+
+      socket.value.once('batch_insurance_result', handleResult);
+      socket.value.once('error', handleError);
+      socket.value.emit('batch_purchase_insurance');
     });
   }
 
@@ -471,6 +519,7 @@ export const useGameStore = defineStore('game', () => {
     currentWeather.value = null;
     lastDisasterResult.value = null;
     weatherEventHistory.value = [];
+    nextTurnForecast.value = null;
   }
 
   return {
@@ -494,6 +543,7 @@ export const useGameStore = defineStore('game', () => {
     currentWeather,
     lastDisasterResult,
     weatherEventHistory,
+    nextTurnForecast,
     currentPlayer,
     isHost,
     isMyTurnReady,
@@ -506,7 +556,10 @@ export const useGameStore = defineStore('game', () => {
     myParticipatedAuctions,
     myInsurances,
     activeInsurances,
+    claimRecords,
+    insuranceStats,
     purchaseInsurance,
+    batchPurchaseInsurance,
     setGameState,
     setCurrentPlayer,
     setPlantsData,
@@ -514,6 +567,7 @@ export const useGameStore = defineStore('game', () => {
     setWeatherForecast,
     setCurrentWeather,
     setLastDisasterResult,
+    setNextTurnForecast,
     clearWeatherHistory,
     setMarketOrders,
     setMarketStats,
