@@ -40,6 +40,38 @@
 
       <el-divider />
 
+      <div class="section-title">🛡️ 保险</div>
+      <div class="insurance-summary">
+        <div class="insurance-stat">
+          <span>已投保</span>
+          <span class="stat-value">{{ gameStore.activeInsurances.length }} 株</span>
+        </div>
+      </div>
+
+      <div v-if="gameStore.myInsurances.length > 0" class="insurance-list">
+        <div
+          v-for="item in gameStore.myInsurances"
+          :key="item.policy.id"
+          class="insurance-item"
+          :class="{ expired: item.policy.status === 'expired' }"
+        >
+          <span class="insurance-icon">{{ gameStore.allSpecies[item.policy.speciesId]?.icon }}</span>
+          <div class="insurance-info">
+            <div class="insurance-name">{{ item.speciesName }} ({{ item.plot.x }},{{ item.plot.y }})</div>
+            <div class="insurance-detail">
+              保额 {{ item.policy.insuredValue }} · 剩余 {{ item.policy.endTurn - (gameStore.gameState?.turn || 0) }} 回合
+            </div>
+          </div>
+          <el-tag v-if="item.policy.status === 'active'" type="success" size="small">有效</el-tag>
+          <el-tag v-else type="info" size="small">已过期</el-tag>
+        </div>
+      </div>
+      <div v-else class="empty">
+        暂无保险，点击植物可购买
+      </div>
+
+      <el-divider />
+
       <div class="section-title">种子库存</div>
       <div class="seed-inventory">
         <div
@@ -172,6 +204,62 @@ function updateTicket(val: number) {
   background: #e8f5e9;
   border-radius: 12px;
   font-size: 12px;
+}
+
+.insurance-summary {
+  margin-bottom: 8px;
+}
+
+.insurance-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.insurance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.insurance-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #e3f2fd;
+  border-radius: 6px;
+  border-left: 3px solid #2196f3;
+}
+
+.insurance-item.expired {
+  background: #f5f5f5;
+  border-left-color: #9e9e9e;
+  opacity: 0.6;
+}
+
+.insurance-icon {
+  font-size: 18px;
+}
+
+.insurance-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.insurance-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+}
+
+.insurance-detail {
+  font-size: 10px;
+  color: #666;
+  margin-top: 2px;
 }
 
 .empty {

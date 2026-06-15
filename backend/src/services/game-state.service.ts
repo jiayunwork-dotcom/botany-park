@@ -12,13 +12,20 @@ import {
   RandomEvent,
   WeatherForecast,
   MarketOrder,
-  AuctionSettlementResult
+  AuctionSettlementResult,
+  WeatherEvent,
+  PlayerDisasterResult,
+  InsurancePurchaseResult,
+  InsurancePolicy
 } from '../types/game.types';
 import { RedisService } from './redis.service';
 import { GameFactoryService } from './game-factory.service';
 import { GameEngineService } from './game-engine.service';
 import { TradeService } from './trade.service';
 import { AuctionService } from './auction.service';
+import { WeatherService } from './weather.service';
+import { DisasterService } from './disaster.service';
+import { InsuranceService } from './insurance.service';
 import { getPlantById, PLANT_DATABASE } from '../data/plants.data';
 import { GAME_CONFIG } from '../config/game.config';
 import { v4 as uuidv4 } from 'uuid';
@@ -32,7 +39,10 @@ export class GameStateService {
     private readonly gameFactory: GameFactoryService,
     private readonly gameEngine: GameEngineService,
     private readonly tradeService: TradeService,
-    private readonly auctionService: AuctionService
+    private readonly auctionService: AuctionService,
+    private readonly weatherService: WeatherService,
+    private readonly disasterService: DisasterService,
+    private readonly insuranceService: InsuranceService
   ) {}
 
   private getGameKey(gameId: string): string {
@@ -147,6 +157,8 @@ export class GameStateService {
     weatherForecast: WeatherForecast;
     expiredMarketOrders: MarketOrder[];
     auctionSettlementResults: AuctionSettlementResult[];
+    weatherEvent: WeatherEvent | null;
+    disasterResults: PlayerDisasterResult[];
   } | null> {
     const game = await this.getGame(gameId);
     if (!game || game.phase !== GamePhase.PLAYING) return null;
@@ -156,6 +168,7 @@ export class GameStateService {
     const randomEvents: RandomEvent[] = [];
     let expiredMarketOrders: MarketOrder[] = [];
     let auctionSettlementResults: AuctionSettlementResult[] = [];
+    const disasterResults: PlayerDisasterResult[] = [];
 
     for (const playerId of game.playerOrder) {
       const player = game.players[playerId];
@@ -175,6 +188,44 @@ export class GameStateService {
       const player = game.players[playerId];
       if (player.isBankrupt) continue;
       this.processPlantGrowth(player, game, events);
+    }
+
+    const weatherEvent = this.weatherService.generateWeather(game.season, game.turn, game.gameSeed);
+    game.currentWeather = weatherEvent;
+
+    if (this.weatherService.isDisasterWeather(weatherEvent)) {
+      events.push(`【天气灾害】${weatherEvent.icon} ${weatherEvent.name} - ${weatherEvent.description}`);
+
+      for (const playerId of game.playerOrder) {
+        const player = game.players[playerId];
+        if (player.isBankrupt) continue;
+
+        const disasterResult = this.disasterService.processPlayerDisaster(
+          player,
+          weatherEvent,
+          game.gameSeed,
+          game.turn
+        );
+        disasterResults.push(disasterResult);
+
+        if (disasterResult.totalDamageCount > 0) {
+          const damageInfo = `${disasterResult.playerName} 有 ${disasterResult.totalDamageCount} 株植物受损，${disasterResult.totalDeathCount} 株枯死`;
+          events.push(`  - ${damageInfo}`);
+
+          if (disasterResult.totalInsurancePayout > 0) {
+            events.push(`  - 🛡️ ${disasterResult.playerName} 获得保险理赔 ${disasterResult.totalInsurancePayout} 金币`);
+          }
+        }
+      }
+    }
+
+    for (const playerId of game.playerOrder) {
+      const player = game.players[playerId];
+      if (player.isBankrupt) continue;
+      const { expired } = this.insuranceService.updateInsuranceStatus(player, game.turn);
+      if (expired.length > 0) {
+        events.push(`${player.name} 有 ${expired.length} 份保险已过期`);
+      }
     }
 
     const allPlayers = Object.values(game.players);
@@ -248,7 +299,7 @@ export class GameStateService {
     const weatherForecast = this.gameEngine.getWeatherForecast(game);
 
     await this.saveGame(game);
-    return { game, events, randomEvents, weatherForecast, expiredMarketOrders, auctionSettlementResults };
+    return { game, events, randomEvents, weatherForecast, expiredMarketOrders, auctionSettlementResults, weatherEvent, disasterResults };
   }
 
   private executePlayerActions(player: PlayerState, game: GameState, events: string[]) {
@@ -631,5 +682,54 @@ export class GameStateService {
         game.currentEvents.push(event);
       }
     }
+  }
+
+  async purchaseInsurance(
+    gameId: string,
+    playerId: string,
+    x: number,
+    y: number
+  ): Promise<InsurancePurchaseResult | null> {
+    const game = await this.getGame(gameId);
+    if (!game || game.phase !== GamePhase.PLAYING) return null;
+
+    const player = game.players[playerId];
+    if (!player || player.isBankrupt) return null;
+
+    const result = this.insuranceService.purchaseInsurance(player, x, y, game.turn);
+
+    if (result.success) {
+      await this.saveGame(game);
+    }
+
+    return result;
+  }
+
+  async getInsuranceQuote(
+    gameId: string,
+    playerId: string,
+    x: number,
+    y: number
+  ): Promise<{ premium: number; plantValue: number; success: boolean; error?: string } | null> {
+    const game = await this.getGame(gameId);
+    if (!game) return null;
+
+    const player = game.players[playerId];
+    if (!player) return null;
+
+    const plot = player.plots[y]?.[x];
+    if (!plot || !plot.plant) {
+      return { success: false, premium: 0, plantValue: 0, error: '该地块没有植物' };
+    }
+
+    const species = getPlantById(plot.plant.speciesId);
+    if (!species) {
+      return { success: false, premium: 0, plantValue: 0, error: '未知植物种类' };
+    }
+
+    const plantValue = this.insuranceService.calculatePlantValue(plot.plant, species);
+    const premium = this.insuranceService.calculatePremium(plot.plant, species);
+
+    return { success: true, premium, plantValue };
   }
 }

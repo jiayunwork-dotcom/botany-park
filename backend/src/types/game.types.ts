@@ -88,6 +88,7 @@ export interface PlantInstance {
   growthModifier: number;
   isWild: boolean;
   domesticationTurns: number;
+  insurance?: InsurancePolicy | null;
 }
 
 export interface PlayerAction {
@@ -178,6 +179,8 @@ export interface GameState {
   lastUpdate: number;
   publicFunds: number;
   tradeTaxRate: number;
+  gameSeed: number;
+  currentWeather: WeatherEvent | null;
 }
 
 export interface TradeOffer {
@@ -341,4 +344,81 @@ export interface AuctionSettlementResult {
   taxAmount: number;
   sellerReceive: number;
   reason: string;
+}
+
+export enum WeatherType {
+  SUNNY = 'sunny',
+  CLOUDY = 'cloudy',
+  RAINSTORM = 'rainstorm',
+  DROUGHT = 'drought',
+  FROST = 'frost',
+  TYPHOON = 'typhoon',
+  PEST = 'pest'
+}
+
+export interface WeatherEvent {
+  type: WeatherType;
+  name: string;
+  icon: string;
+  description: string;
+  severity: number;
+  turn: number;
+  season: Season;
+}
+
+export enum DamageLevel {
+  NONE = 'none',
+  LIGHT = 'light',
+  HEAVY = 'heavy',
+  DEADLY = 'deadly'
+}
+
+export interface PlantDamageResult {
+  plotId: string;
+  x: number;
+  y: number;
+  speciesId: string;
+  speciesName: string;
+  damageLevel: DamageLevel;
+  healthChange: number;
+  healthBefore: number;
+  healthAfter: number;
+  died: boolean;
+  insurancePayout?: number;
+}
+
+export interface PlayerDisasterResult {
+  playerId: string;
+  playerName: string;
+  weatherType: WeatherType;
+  damages: PlantDamageResult[];
+  totalDamageCount: number;
+  totalDeathCount: number;
+  totalInsurancePayout: number;
+}
+
+export enum InsuranceStatus {
+  NONE = 'none',
+  ACTIVE = 'active',
+  EXPIRED = 'expired'
+}
+
+export interface InsurancePolicy {
+  id: string;
+  plotId: string;
+  speciesId: string;
+  premium: number;
+  insuredValue: number;
+  payoutRate: number;
+  startTurn: number;
+  endTurn: number;
+  status: InsuranceStatus;
+}
+
+export interface InsurancePurchaseResult {
+  success: boolean;
+  policy?: InsurancePolicy;
+  error?: string;
+  premium?: number;
+  plantValue?: number;
 }

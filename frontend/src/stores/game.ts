@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { socket } from '../services/socket';
 import type {
   GameState,
   PlayerState,
@@ -18,7 +19,11 @@ import type {
   AuctionSettlementResult,
   AuctionBid,
   ProxyBid,
-  BidStatus
+  BidStatus,
+  WeatherEvent,
+  PlayerDisasterResult,
+  InsurancePolicy,
+  InsurancePurchaseResult
 } from '../types/game';
 
 export interface SeedSuitability {
@@ -56,6 +61,9 @@ export const useGameStore = defineStore('game', () => {
   const auctions = ref<Auction[]>([]);
   const auctionHistory = ref<Auction[]>([]);
   const recentAuctionSettlements = ref<AuctionSettlementResult[]>([]);
+  const currentWeather = ref<WeatherEvent | null>(null);
+  const lastDisasterResult = ref<PlayerDisasterResult | null>(null);
+  const weatherEventHistory = ref<WeatherEvent[]>([]);
 
   const currentPlayer = computed<PlayerState | null>(() => {
     if (!gameState.value || !currentPlayerId.value) return null;
@@ -230,6 +238,80 @@ export const useGameStore = defineStore('game', () => {
     weatherForecast.value = forecast;
   }
 
+  function setCurrentWeather(weather: WeatherEvent | null) {
+    currentWeather.value = weather;
+    if (weather) {
+      weatherEventHistory.value.unshift(weather);
+      if (weatherEventHistory.value.length > 20) {
+        weatherEventHistory.value = weatherEventHistory.value.slice(0, 20);
+      }
+    }
+  }
+
+  function setLastDisasterResult(result: PlayerDisasterResult | null) {
+    lastDisasterResult.value = result;
+  }
+
+  function clearWeatherHistory() {
+    weatherEventHistory.value = [];
+  }
+
+  const myInsurances = computed(() => {
+    if (!currentPlayer.value) return [];
+    const result: { plot: Plot; policy: InsurancePolicy; speciesName: string }[] = [];
+    for (const row of currentPlayer.value.plots) {
+      for (const plot of row) {
+        if (plot.plant?.insurance) {
+          const species = allSpecies.value[plot.plant.speciesId];
+          result.push({
+            plot,
+            policy: plot.plant.insurance,
+            speciesName: species?.name || '未知'
+          });
+        }
+      }
+    }
+    return result;
+  });
+
+  const activeInsurances = computed(() => {
+    return myInsurances.value.filter(item => item.policy.status === 'active');
+  });
+
+  function purchaseInsurance(x: number, y: number): Promise<InsurancePurchaseResult> {
+    return new Promise((resolve, reject) => {
+      if (!socket.value) {
+        reject(new Error('未连接到服务器'));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        reject(new Error('购买保险超时'));
+      }, 5000);
+
+      const handleResult = (result: InsurancePurchaseResult) => {
+        clearTimeout(timeout);
+        socket.value?.off('insurance_purchased', handleResult);
+        socket.value?.off('error', handleError);
+        if (result.success) {
+          resolve(result);
+        } else {
+          reject(new Error(result.error || '购买失败'));
+        }
+      };
+
+      const handleError = (err: any) => {
+        clearTimeout(timeout);
+        socket.value?.off('insurance_purchased', handleResult);
+        socket.value?.off('error', handleError);
+        reject(err);
+      };
+
+      socket.value.once('insurance_purchased', handleResult);
+      socket.value.emit('purchase_insurance', { x, y });
+    });
+  }
+
   function addPendingRandomEvent(event: RandomEvent) {
     pendingRandomEvents.value.push(event);
   }
@@ -386,6 +468,9 @@ export const useGameStore = defineStore('game', () => {
     auctions.value = [];
     auctionHistory.value = [];
     recentAuctionSettlements.value = [];
+    currentWeather.value = null;
+    lastDisasterResult.value = null;
+    weatherEventHistory.value = [];
   }
 
   return {
@@ -406,6 +491,9 @@ export const useGameStore = defineStore('game', () => {
     auctions,
     auctionHistory,
     recentAuctionSettlements,
+    currentWeather,
+    lastDisasterResult,
+    weatherEventHistory,
     currentPlayer,
     isHost,
     isMyTurnReady,
@@ -416,11 +504,17 @@ export const useGameStore = defineStore('game', () => {
     activeAuctions,
     myCreatedAuctions,
     myParticipatedAuctions,
+    myInsurances,
+    activeInsurances,
+    purchaseInsurance,
     setGameState,
     setCurrentPlayer,
     setPlantsData,
     setLeaderboard,
     setWeatherForecast,
+    setCurrentWeather,
+    setLastDisasterResult,
+    clearWeatherHistory,
     setMarketOrders,
     setMarketStats,
     setPublicFunds,

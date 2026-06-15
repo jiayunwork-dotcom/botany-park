@@ -19,6 +19,7 @@ import { GAME_CONFIG } from '../config/game.config';
 export class GameFactoryService {
   createGame(hostId: string, hostName: string, hostSocketId: string): GameState {
     const gameId = uuidv4();
+    const gameSeed = Math.floor(Math.random() * 1000000);
     const game: GameState = {
       id: gameId,
       phase: GamePhase.WAITING,
@@ -35,7 +36,9 @@ export class GameFactoryService {
       allSpecies: { ...PLANT_DATABASE },
       lastUpdate: Date.now(),
       publicFunds: 0,
-      tradeTaxRate: 0.05
+      tradeTaxRate: 0.05,
+      gameSeed,
+      currentWeather: null
     };
 
     game.players[hostId] = this.createPlayer(hostId, hostName, hostSocketId);

@@ -152,7 +152,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (this.gameState.allActionsSubmitted(game)) {
       const result = await this.gameState.processTurn(clientInfo.gameId);
       if (result) {
-        const { game: updatedGame, events, randomEvents, weatherForecast, expiredMarketOrders, auctionSettlementResults } = result;
+        const { game: updatedGame, events, randomEvents, weatherForecast, expiredMarketOrders, auctionSettlementResults, weatherEvent, disasterResults } = result;
         const leaderboard = this.gameEngine.getLeaderboard(updatedGame);
 
         this.server.to(updatedGame.id).emit('turn_processed', {
@@ -163,8 +163,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           weatherForecast,
           leaderboard,
           expiredMarketOrders,
-          auctionSettlementResults
+          auctionSettlementResults,
+          weatherEvent
         });
+
+        if (weatherEvent) {
+          this.server.to(updatedGame.id).emit('weather_event', weatherEvent);
+        }
+
+        if (disasterResults && disasterResults.length > 0) {
+          for (const disasterResult of disasterResults) {
+            const playerSocket = this.findSocketByPlayerId(updatedGame.id, disasterResult.playerId);
+            if (playerSocket) {
+              this.server.to(playerSocket).emit('disaster_result', disasterResult);
+            }
+          }
+        }
 
         if (auctionSettlementResults && auctionSettlementResults.length > 0) {
           for (const settlementResult of auctionSettlementResults) {
@@ -774,6 +788,59 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.emit('auction_history', { history });
   }
 
+  @SubscribeMessage('get_insurance_quote')
+  async handleGetInsuranceQuote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { x: number; y: number }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const result = await this.gameState.getInsuranceQuote(
+      clientInfo.gameId,
+      clientInfo.playerId,
+      data.x,
+      data.y
+    );
+
+    if (result) {
+      client.emit('insurance_quote', result);
+    }
+  }
+
+  @SubscribeMessage('purchase_insurance')
+  async handlePurchaseInsurance(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { x: number; y: number }
+  ) {
+    const clientInfo = this.clients[client.id];
+    if (!clientInfo || !clientInfo.gameId) return;
+
+    const result = await this.gameState.purchaseInsurance(
+      clientInfo.gameId,
+      clientInfo.playerId,
+      data.x,
+      data.y
+    );
+
+    if (!result) {
+      client.emit('error', { message: '购买保险失败' });
+      return;
+    }
+
+    if (!result.success) {
+      client.emit('error', { message: result.error || '购买保险失败' });
+      return;
+    }
+
+    client.emit('insurance_purchased', result);
+
+    const game = await this.gameState.getGame(clientInfo.gameId);
+    if (game) {
+      this.broadcastGameState(game.id, game);
+    }
+  }
+
   private findSocketByPlayerId(gameId: string, playerId: string): string | null {
     for (const [socketId, info] of Object.entries(this.clients)) {
       if (info.gameId === gameId && info.playerId === playerId) {
@@ -840,7 +907,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       allSpecies: game.allSpecies,
       cityTouristBase: game.cityTouristBase,
       publicFunds: game.publicFunds || 0,
-      tradeTaxRate: game.tradeTaxRate || 0.05
+      tradeTaxRate: game.tradeTaxRate || 0.05,
+      currentWeather: game.currentWeather || null
     };
   }
 }

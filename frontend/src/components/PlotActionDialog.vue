@@ -29,6 +29,43 @@
         <p>年龄: {{ plot.plant.age }} 回合</p>
         <p v-if="plot.plant.isBlooming" style="color: #e91e63;">🌸 正在开花！</p>
       </div>
+
+      <div v-if="plot.plant.insurance" class="insurance-info">
+        <div class="insurance-header">
+          <span>🛡️ 保险状态</span>
+          <el-tag :type="plot.plant.insurance.status === 'active' ? 'success' : 'info'" size="small">
+            {{ plot.plant.insurance.status === 'active' ? '已投保' : '已过期' }}
+          </el-tag>
+        </div>
+        <div class="insurance-detail">
+          <p>保额: 💰 {{ plot.plant.insurance.insuredValue }}</p>
+          <p>赔付比例: {{ Math.round(plot.plant.insurance.payoutRate * 100) }}%</p>
+          <p>保障期限: 第 {{ plot.plant.insurance.startTurn }} ~ {{ plot.plant.insurance.endTurn }} 回合</p>
+          <p>剩余: {{ Math.max(0, plot.plant.insurance.endTurn - (gameStore.gameState?.turn || 0)) }} 回合</p>
+        </div>
+      </div>
+
+      <div v-else class="insurance-buy">
+        <div class="insurance-header">
+          <span>🛡️ 植物保险</span>
+        </div>
+        <div class="insurance-quote" v-if="insuranceQuote">
+          <p>植物市值: 💰 {{ insuranceQuote.plantValue }}</p>
+          <p>保费: 💰 {{ insuranceQuote.premium }} (市值的15%)</p>
+          <p>赔付: 市值的 80%</p>
+          <p>保障期限: 5 回合</p>
+        </div>
+        <el-button
+          type="primary"
+          @click="doPurchaseInsurance"
+          :disabled="!canBuyInsurance || isBuying"
+          :loading="isBuying"
+          style="width: 100%; margin-top: 8px;"
+        >
+          {{ isBuying ? '购买中...' : '购买保险' }}
+        </el-button>
+      </div>
+
       <el-button type="danger" @click="doRemove" style="margin-top: 10px;">
         🗑️ 移除植物 (可回收部分金币)
       </el-button>
@@ -87,7 +124,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import { ElMessage } from 'element-plus';
 import type { Plot, PlayerAction, PlotType } from '../types/game';
 import { useGameStore } from '../stores/game';
 
@@ -198,6 +236,50 @@ function doUpgrade(newType: string) {
     data: { x: props.plot.x, y: props.plot.y, newType: newType as PlotType }
   });
 }
+
+const isBuying = ref(false);
+
+const insuranceQuote = computed(() => {
+  if (!props.plot.plant) return null;
+  const plant = props.plot.plant;
+  const species = gameStore.allSpecies[plant.speciesId];
+  if (!species) return null;
+
+  const growthRatio = plant.biomass / plant.maxBiomass;
+  const plantValue = Math.round(species.baseValue * (0.3 + growthRatio * 0.7));
+  const premium = Math.round(plantValue * 0.15);
+
+  return {
+    plantValue,
+    premium
+  };
+});
+
+const canBuyInsurance = computed(() => {
+  if (!props.plot.plant) return false;
+  if (props.plot.plant.insurance && props.plot.plant.insurance.status === 'active') return false;
+  if (!insuranceQuote.value) return false;
+  return player.value.money >= insuranceQuote.value.premium;
+});
+
+async function doPurchaseInsurance() {
+  if (!canBuyInsurance.value) return;
+  if (isBuying.value) return;
+
+  isBuying.value = true;
+  try {
+    const result = await gameStore.purchaseInsurance(props.plot.x, props.plot.y);
+    if (result.success) {
+      ElMessage.success('保险购买成功！');
+    } else {
+      ElMessage.error(result.error || '购买失败');
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '购买失败');
+  } finally {
+    isBuying.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -239,6 +321,32 @@ function doUpgrade(newType: string) {
 .plant-stats p {
   margin: 6px 0;
   font-size: 14px;
+  color: #555;
+}
+
+.insurance-info,
+.insurance-buy {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #e3f2fd;
+  border-radius: 8px;
+  border-left: 4px solid #2196f3;
+}
+
+.insurance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-weight: bold;
+  font-size: 14px;
+  color: #1565c0;
+}
+
+.insurance-detail p,
+.insurance-quote p {
+  margin: 4px 0;
+  font-size: 12px;
   color: #555;
 }
 

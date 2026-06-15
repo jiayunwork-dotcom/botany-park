@@ -12,7 +12,7 @@ import GameLobby from './components/GameLobby.vue';
 import GameBoard from './components/GameBoard.vue';
 import { useGameStore } from './stores/game';
 import { initSocket, socket } from './services/socket';
-import type { RandomEvent, WeatherForecast, Auction, AuctionBid, AuctionSettlementResult } from './types/game';
+import type { RandomEvent, WeatherForecast, Auction, AuctionBid, AuctionSettlementResult, WeatherEvent, PlayerDisasterResult, InsurancePurchaseResult } from './types/game';
 
 const gameStore = useGameStore();
 
@@ -23,6 +23,9 @@ onMounted(async () => {
 
     socket.value?.on('game_state', (state) => {
       gameStore.setGameState(state);
+      if (state.currentWeather) {
+        gameStore.setCurrentWeather(state.currentWeather);
+      }
       if (state.phase === 'playing') {
         socket.value?.emit('get_auctions');
       }
@@ -42,6 +45,7 @@ onMounted(async () => {
       weatherForecast: WeatherForecast;
       leaderboard: any[];
       auctionSettlementResults?: AuctionSettlementResult[];
+      weatherEvent?: WeatherEvent;
     }) => {
       gameStore.addTurnEvents(data.events);
       gameStore.setLeaderboard(data.leaderboard);
@@ -49,6 +53,10 @@ onMounted(async () => {
 
       if (data.weatherForecast) {
         gameStore.setWeatherForecast(data.weatherForecast);
+      }
+
+      if (data.weatherEvent) {
+        gameStore.setCurrentWeather(data.weatherEvent);
       }
 
       if (data.randomEvents && data.randomEvents.length > 0) {
@@ -146,6 +154,30 @@ onMounted(async () => {
         }
       } else {
         ElMessage.info(`🏛️ 一场拍卖流拍：${result.reason}`);
+      }
+    });
+
+    socket.value?.on('weather_event', (weather: WeatherEvent) => {
+      gameStore.setCurrentWeather(weather);
+      if (weather.severity > 0) {
+        ElMessage.warning(`⚠️ 天气灾害：${weather.icon} ${weather.name} - ${weather.description}`);
+      }
+    });
+
+    socket.value?.on('disaster_result', (result: PlayerDisasterResult) => {
+      gameStore.setLastDisasterResult(result);
+      if (result.totalDamageCount > 0) {
+        let msg = `🌪️ 你的植物园受灾：${result.totalDamageCount} 株受损，${result.totalDeathCount} 株枯死`;
+        if (result.totalInsurancePayout > 0) {
+          msg += `，🛡️ 保险理赔 ${result.totalInsurancePayout} 金币`;
+        }
+        ElMessage.error(msg);
+      }
+    });
+
+    socket.value?.on('insurance_purchased', (result: InsurancePurchaseResult) => {
+      if (result.success) {
+        ElMessage.success(`🛡️ 保险购买成功！保费：💰 ${result.premium}`);
       }
     });
 

@@ -5,6 +5,9 @@ import { GameEngineService } from './services/game-engine.service';
 import { GameStateService } from './services/game-state.service';
 import { TradeService } from './services/trade.service';
 import { AuctionService } from './services/auction.service';
+import { WeatherService } from './services/weather.service';
+import { DisasterService } from './services/disaster.service';
+import { InsuranceService } from './services/insurance.service';
 import { GameGateway } from './gateways/game.gateway';
 
 @Module({
@@ -17,6 +20,9 @@ import { GameGateway } from './gateways/game.gateway';
     GameStateService,
     TradeService,
     AuctionService,
+    WeatherService,
+    DisasterService,
+    InsuranceService,
     GameGateway
   ]
 })

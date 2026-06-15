@@ -62,6 +62,13 @@
             <div v-if="plot.plant.domesticationTurns > 0" class="domestic-tag">
               驯化{{ plot.plant.domesticationTurns }}
             </div>
+            <div
+              v-if="plot.plant.insurance"
+              class="insurance-tag"
+              :class="{ expired: plot.plant.insurance.status === 'expired' }"
+            >
+              🛡️
+            </div>
           </div>
 
           <div v-else class="plot-type-icon">
@@ -265,6 +272,21 @@ function handleClick(plot: Plot) {
   color: white;
   padding: 1px 3px;
   border-radius: 2px;
+}
+
+.insurance-tag {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  font-size: 10px;
+  background: rgba(33, 150, 243, 0.9);
+  color: white;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+
+.insurance-tag.expired {
+  background: rgba(158, 158, 158, 0.7);
 }
 
 .plot-type-icon {
